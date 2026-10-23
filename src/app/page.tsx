@@ -1,7 +1,5 @@
+import { RehearsalApp } from "@/state/RehearsalApp";
+
 export default function Page() {
-  return (
-    <main>
-      <h1>Ghost Rehearsal</h1>
-    </main>
-  );
+  return <RehearsalApp />;
 }
