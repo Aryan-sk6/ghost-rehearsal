@@ -12,3 +12,10 @@ Verified only against hand-written fakes, never a real browser, microphone or sp
   - The no-speech timeout is armed once per `start()`, not re-armed after each continuous utterance or restart.
   - Whether `onspeechstart` fires before the first result on real hardware.
   - Counterpart audio leaking into the microphone (use headphones).
+- `createSpeech`, `linkBargeIn` and `createTypedTextInput`, only against fakes:
+  - The real microphone permission prompt (timing, dismissal, remembered denial) and the point at which it appears relative to `start()`.
+  - Chrome's recognition accuracy and when it auto-stops on its own.
+  - Echo: whether the counterpart's synthesised voice triggers `onSpeechStart` on a real device and cancels itself through barge-in; and how quickly `speechSynthesis.cancel()` actually silences playback.
+  - Voice loading: `getVoices()` timing and which English voice a real browser picks.
+  - Edge, Safari and Firefox behaviour (Firefox has no recognition and falls back to typed; Safari's prefixed recognition and synthesis quirks).
+  - `createSpeech` picks its input once; a recognition failure after that (for example a failed restart, reported as `unknown` then `onEnd("error")`) does not switch the bundle to typed input. The caller has to do that.
