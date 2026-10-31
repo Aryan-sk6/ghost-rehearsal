@@ -104,6 +104,25 @@ function DeltaBadge({ delta }: { delta: number | null }) {
   );
 }
 
+function CheckChips({ checks }: { checks: UserStep["checks"] }) {
+  if (checks.length === 0) return null;
+  return (
+    <ul aria-label="What this turn did" className="flex flex-wrap gap-2">
+      {checks.map((check) => (
+        <li
+          key={check.kind}
+          className={`rounded-full border px-2.5 py-0.5 text-xs ${
+            check.good ? "border-success/40 text-success" : "border-warning/40 text-warning"
+          }`}
+        >
+          <span aria-hidden="true">{check.good ? "✓ " : "! "}</span>
+          {check.label}: &ldquo;{check.evidence}&rdquo;
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function StepRow({ step, tag }: { step: UserStep; tag: string | null }) {
   return (
     <li className="flex flex-col gap-1 border-t border-line pt-3 first:border-t-0 first:pt-0">
@@ -120,6 +139,7 @@ function StepRow({ step, tag }: { step: UserStep; tag: string | null }) {
         </span>
       </div>
       <p className="text-ink">&ldquo;{step.text}&rdquo;</p>
+      <CheckChips checks={step.checks} />
     </li>
   );
 }
@@ -143,7 +163,8 @@ export function BehindTheScenes({ turns, giveHistory, moodHistory, hiddenBottomL
           <p className="text-ink">{outcomeLine(timeline)}</p>
           <p className="text-sm text-ink-muted">
             This score was hidden while you talked. It goes up for clear, specific, calm asks and down for hedging or
-            pushing too hard.
+            pushing too hard. The tags under each line are simple word checks: naming a number and giving a reason
+            help; hedging, apologising and giving ground hurt.
           </p>
         </div>
         <GiveChart timeline={timeline} />

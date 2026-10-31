@@ -1,5 +1,6 @@
 import { GOAL_GIVE, START_GIVE } from "@/contracts/constants";
 import type { Mood, Turn } from "@/contracts/types";
+import { checkUserTurn, type TurnCheck } from "@/lib/analysis";
 
 /** Their willingness after one of their turns. */
 export interface GivePoint {
@@ -19,6 +20,8 @@ export interface UserStep {
   after: number | null;
   delta: number | null;
   moodAfter: Mood | null;
+  /** What the turn did (named a number, hedged, ...), from word matching. */
+  checks: TurnCheck[];
 }
 
 export interface GiveTimeline {
@@ -65,6 +68,7 @@ export function buildGiveTimeline(
       after,
       delta: after === null ? null : after - before,
       moodAfter: replied ? (moodHistory[i + 1] ?? null) : null,
+      checks: checkUserTurn(turn.text),
     });
   });
 

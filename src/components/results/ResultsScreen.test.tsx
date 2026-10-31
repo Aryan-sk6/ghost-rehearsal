@@ -172,9 +172,9 @@ describe("ResultsScreen reveal", () => {
       ),
     ).toBeInTheDocument();
     expect(section.getByRole("img", { name: /from 30 to 20 out of 100/ })).toBeInTheDocument();
-    const rows = within(section.getByRole("list", { name: "How each of your turns moved them" })).getAllByRole(
-      "listitem",
-    );
+    const rows = Array.from(
+      section.getByRole("list", { name: "How each of your turns moved them" }).children,
+    ) as HTMLElement[];
     expect(rows).toHaveLength(3);
     expect(rows[0]).toHaveTextContent("Down 5");
     expect(rows[0]).toHaveTextContent("Then: Guarded");
@@ -182,6 +182,11 @@ describe("ResultsScreen reveal", () => {
     expect(rows[1]).toHaveTextContent("Down 10");
     expect(rows[2]).toHaveTextContent("Best move");
     expect(rows[2]).toHaveTextContent("Up 5");
+    expect(within(rows[0]!).getByRole("list", { name: "What this turn did" })).toHaveTextContent(
+      "Hedged: “I think maybe”",
+    );
+    expect(rows[1]).toHaveTextContent("Gave ground: “Fair enough”");
+    expect(within(rows[2]!).queryByRole("list", { name: "What this turn did" })).not.toBeInTheDocument();
     expect(section.getByText(SCENARIO.hiddenBottomLine)).toBeInTheDocument();
   });
 });
