@@ -3,6 +3,7 @@
 import type { SessionError } from "@/components/session/SessionScreen";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
+import type { PrepPlan } from "@/lib/analysis";
 import type {
   EndReason,
   Mood,
@@ -13,6 +14,7 @@ import type {
 } from "@/contracts/types";
 import { BehindTheScenes } from "./BehindTheScenes";
 import { LostGroundList } from "./LostGroundList";
+import { PrepCard } from "./PrepCard";
 import { RetryComparisonCard } from "./RetryComparisonCard";
 import type { RetrySnapshot } from "./reveal";
 import { MetricsPanel } from "./MetricsPanel";
@@ -34,6 +36,8 @@ export interface ResultsScreenProps {
   moodHistory: readonly Mood[];
   /** Set when this attempt came from "Retry from here". */
   retry?: RetrySnapshot | null;
+  /** What the user planned before starting, if anything. */
+  plan?: PrepPlan | null;
   endReason: EndReason;
   metrics: SessionMetrics;
   analysis: AnalysisState;
@@ -61,6 +65,7 @@ export function ResultsScreen({
   giveHistory,
   moodHistory,
   retry = null,
+  plan = null,
   endReason,
   metrics,
   analysis,
@@ -95,6 +100,8 @@ export function ResultsScreen({
       {retry !== null ? (
         <RetryComparisonCard retry={retry} turns={turns} giveHistory={giveHistory} moodHistory={moodHistory} />
       ) : null}
+
+      {plan !== null ? <PrepCard plan={plan} turns={turns} /> : null}
 
       {analysis.status === "loading" ? (
         <p role="status" className="text-ink-muted">

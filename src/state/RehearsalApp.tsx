@@ -1,6 +1,7 @@
 "use client";
 
 import { ApiKeyForm } from "@/components/key/ApiKeyForm";
+import { PrepScreen } from "@/components/prep/PrepScreen";
 import { ScenarioPicker } from "@/components/picker/ScenarioPicker";
 import { ResultsScreen } from "@/components/results/ResultsScreen";
 import { SessionScreen } from "@/components/session/SessionScreen";
@@ -13,7 +14,7 @@ export interface RehearsalAppProps {
 }
 
 export function RehearsalApp({ deps = browserDeps }: RehearsalAppProps) {
-  const { view, keyRejected, session, results, actions } = useRehearsal(deps);
+  const { view, keyRejected, prep, session, results, actions } = useRehearsal(deps);
 
   if (view === "key") {
     return <ApiKeyForm onSubmit={actions.submitKey} rejected={keyRejected} />;
@@ -27,6 +28,7 @@ export function RehearsalApp({ deps = browserDeps }: RehearsalAppProps) {
         giveHistory={results.giveHistory}
         moodHistory={results.moodHistory}
         retry={results.retry}
+        plan={results.plan}
         endReason={results.endReason}
         metrics={results.metrics}
         analysis={results.analysis}
@@ -34,6 +36,18 @@ export function RehearsalApp({ deps = browserDeps }: RehearsalAppProps) {
         onRetryAnalysis={actions.retryAnalysis}
         onNewKey={actions.requestNewKey}
         onRestart={actions.restart}
+      />
+    );
+  }
+
+  if (view === "prep" && prep !== null) {
+    return (
+      <PrepScreen
+        key={prep.scenario.id}
+        scenario={prep.scenario}
+        initial={prep.initial}
+        onStart={actions.startConversation}
+        onBack={actions.backToPicker}
       />
     );
   }

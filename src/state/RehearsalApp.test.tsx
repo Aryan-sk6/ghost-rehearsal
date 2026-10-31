@@ -61,6 +61,7 @@ async function enterKeyAndPick(key = KEY) {
   await userEvent.type(screen.getByLabelText("Anthropic API key"), key);
   await userEvent.click(screen.getByRole("button", { name: "Start rehearsing" }));
   await userEvent.click(screen.getByRole("button", { name: `Practise this: ${SALARY?.title}` }));
+  await userEvent.click(screen.getByRole("button", { name: "Start the conversation" }));
   await waitFor(() => expect(screen.getByText("Your turn")).toBeInTheDocument());
 }
 
@@ -159,6 +160,58 @@ describe("RehearsalApp", () => {
     // A new scenario forgets the retry.
     await userEvent.click(screen.getByRole("button", { name: "Practise another" }));
     expect(screen.queryByRole("region", { name: /Your retry/ })).not.toBeInTheDocument();
+  });
+
+  it("checks the prep plan against what was said, and keeps it for a repeat", async () => {
+    const h = harness([
+      reply("Budgets are tight this year.", 40),
+      reply("Hmm, maybe.", 35),
+      reply("I can do that.", 50),
+    ]);
+    render(<RehearsalApp deps={h.deps} />);
+    await userEvent.type(screen.getByLabelText("Anthropic API key"), KEY);
+    await userEvent.click(screen.getByRole("button", { name: "Start rehearsing" }));
+    await userEvent.click(screen.getByRole("button", { name: `Practise this: ${SALARY?.title}` }));
+
+    expect(screen.getByRole("heading", { name: "Take 30 seconds to plan" })).toBeInTheDocument();
+    expect(h.output.spoken).toEqual([]);
+    expect(document.body.textContent).not.toContain(SALARY?.hiddenBottomLine);
+    await userEvent.type(screen.getByLabelText("What will you ask for?"), "A 10% raise");
+    await userEvent.type(screen.getByLabelText("What’s the least you’d accept?"), "6%");
+    await userEvent.click(screen.getByRole("button", { name: "Start the conversation" }));
+    await waitFor(() => expect(screen.getByText("Your turn")).toBeInTheDocument());
+
+    await say(h.input, "Could I get 8%?", "Budgets are tight this year.");
+    await say(h.input, "What about 5%?", "Hmm, maybe.");
+    await userEvent.click(screen.getByRole("button", { name: "End conversation" }));
+
+    const card = within(await screen.findByRole("region", { name: "Your plan against what you said" }));
+    expect(card.getByText("A 10% raise")).toBeInTheDocument();
+    expect(card.getByText("You planned 10% but opened with 8%, a weaker ask than planned.")).toBeInTheDocument();
+    expect(
+      card.getByText("In your turn 2 you offered 5%, past the 6% you said you'd walk away at."),
+    ).toBeInTheDocument();
+    expect(h.llm.calls.map((c) => c.purpose)).toEqual(["counterpart", "counterpart"]);
+
+    // Practising the same scenario again starts with the plan filled in.
+    await userEvent.click(screen.getByRole("button", { name: "Practise another" }));
+    await userEvent.click(screen.getByRole("button", { name: `Practise this: ${SALARY?.title}` }));
+    expect(screen.getByLabelText("What will you ask for?")).toHaveValue("A 10% raise");
+
+    // "Choose another" goes back without starting anything.
+    await userEvent.click(screen.getByRole("button", { name: "Choose another" }));
+    expect(screen.getByRole("heading", { name: "Choose a conversation to rehearse" })).toBeInTheDocument();
+    expect(h.output.spoken).toHaveLength(3);
+  });
+
+  it("shows no plan card when prep was left blank", async () => {
+    const h = harness([reply("Budgets are tight this year.", 40)]);
+    render(<RehearsalApp deps={h.deps} />);
+    await enterKeyAndPick();
+    await say(h.input, "I would like a raise.", "Budgets are tight this year.");
+    await userEvent.click(screen.getByRole("button", { name: "End conversation" }));
+    expect(await screen.findByText("You ended the conversation.")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Your plan against what you said" })).not.toBeInTheDocument();
   });
 
   it("never shows the hidden bottom line before results", async () => {
@@ -267,6 +320,7 @@ describe("RehearsalApp", () => {
     await userEvent.type(screen.getByLabelText("Anthropic API key"), KEY);
     await userEvent.click(screen.getByRole("button", { name: "Start rehearsing" }));
     await userEvent.click(screen.getByRole("button", { name: `Practise this: ${SALARY?.title}` }));
+    await userEvent.click(screen.getByRole("button", { name: "Start the conversation" }));
 
     // The opening line is still being spoken; pressing the mic cuts it off.
     await waitFor(() => expect(output.isSpeaking()).toBe(true));
@@ -290,6 +344,7 @@ describe("RehearsalApp", () => {
     await userEvent.type(screen.getByLabelText("Anthropic API key"), KEY);
     await userEvent.click(screen.getByRole("button", { name: "Start rehearsing" }));
     await userEvent.click(screen.getByRole("button", { name: `Practise this: ${SALARY?.title}` }));
+    await userEvent.click(screen.getByRole("button", { name: "Start the conversation" }));
     await waitFor(() => expect(output.isSpeaking()).toBe(true));
     act(() => input.emitSpeechStart());
     expect(output.cancelCalls).toBe(1);

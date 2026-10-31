@@ -35,11 +35,11 @@ import {
   endSession,
   requestCounterpartReply,
 } from "@/lib/conversation";
-import { computeMetrics, replayFrom, requestAnalysis } from "@/lib/analysis";
+import { computeMetrics, hasPlan, replayFrom, requestAnalysis, type PrepPlan } from "@/lib/analysis";
 import { linkBargeIn } from "@/lib/speech";
 import type { RehearsalDeps } from "./deps";
 
-export type RehearsalView = "key" | "picker" | "session" | "results";
+export type RehearsalView = "key" | "picker" | "prep" | "session" | "results";
 
 /** What the session screen needs. Deliberately has no give and no hidden bottom line. */
 export interface SessionViewModel {
@@ -63,14 +63,24 @@ export interface ResultsViewModel {
   moodHistory: readonly Mood[];
   /** The attempt this one retried from, if it came from "Retry from here". */
   retry: RetrySnapshot | null;
+  /** What the user planned on the prep screen, if they wrote anything. */
+  plan: PrepPlan | null;
   endReason: EndReason;
   metrics: SessionMetrics;
   analysis: AnalysisState;
 }
 
+/** The prep screen shown between picking a scenario and the conversation. */
+export interface PrepViewModel {
+  scenario: Scenario;
+  initial: PrepPlan | null;
+}
+
 export interface RehearsalActions {
   submitKey(key: string): void;
   pickScenario(scenario: Scenario): void;
+  startConversation(plan: PrepPlan): void;
+  backToPicker(): void;
   toggleMic(): void;
   changeMode(mode: SpeechMode): void;
   sendTyped(text: string): void;
@@ -85,6 +95,7 @@ export interface RehearsalActions {
 export interface UseRehearsal {
   view: RehearsalView;
   keyRejected: boolean;
+  prep: PrepViewModel | null;
   session: SessionViewModel | null;
   results: ResultsViewModel | null;
   actions: RehearsalActions;
@@ -122,6 +133,9 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
   const [metrics, setMetrics] = useState<SessionMetrics | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisState>({ status: "loading" });
   const [retrySnapshot, setRetrySnapshot] = useState<RetrySnapshot | null>(null);
+  const [prepScenario, setPrepScenario] = useState<Scenario | null>(null);
+  /** The plan from the latest start, kept so picking the same scenario again starts filled in. */
+  const [lastPlan, setLastPlan] = useState<{ scenarioId: string; plan: PrepPlan } | null>(null);
 
   // Mutable mirrors, so long-lived callbacks never read stale render state.
   const sessionRef = useRef<Session | null>(null);
@@ -364,7 +378,17 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
 
   // ---- actions ----
 
-  const pickScenario = useCallback(
+  const pickScenario = useCallback((scenario: Scenario) => {
+    setPrepScenario(scenario);
+    setView("prep");
+  }, []);
+
+  const backToPicker = useCallback(() => {
+    setPrepScenario(null);
+    setView("picker");
+  }, []);
+
+  const beginSession = useCallback(
     (scenario: Scenario) => {
       runRef.current += 1;
       const run = runRef.current;
@@ -404,6 +428,16 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
       })();
     },
     [commit, idlePhase, markYourTurn, openSpeech, setPhase],
+  );
+
+  const startConversation = useCallback(
+    (plan: PrepPlan) => {
+      if (prepScenario === null) return;
+      setLastPlan({ scenarioId: prepScenario.id, plan });
+      setPrepScenario(null);
+      beginSession(prepScenario);
+    },
+    [beginSession, prepScenario],
   );
 
   const submitKey = useCallback(
@@ -548,6 +582,7 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
     setMetrics(null);
     setAnalysis({ status: "loading" });
     setRetrySnapshot(null);
+    setPrepScenario(null);
     setPhase("idle");
     setView("picker");
   }, [commit, setPhase, teardownSpeech]);
@@ -561,6 +596,10 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
 
   // ---- view models ----
 
+  const planFor = (scenarioId: string): PrepPlan | null =>
+    lastPlan !== null && lastPlan.scenarioId === scenarioId ? lastPlan.plan : null;
+  const prepModel: PrepViewModel | null =
+    prepScenario === null ? null : { scenario: prepScenario, initial: planFor(prepScenario.id) };
   let sessionModel: SessionViewModel | null = null;
   let resultsModel: ResultsViewModel | null = null;
   if (session !== null) {
@@ -589,6 +628,10 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
         giveHistory: session.giveHistory,
         moodHistory: session.moodHistory,
         retry: retrySnapshot,
+        plan: (() => {
+          const plan = planFor(session.scenario.id);
+          return hasPlan(plan) ? plan : null;
+        })(),
         endReason: session.endReason ?? "user_ended",
         metrics,
         analysis,
@@ -599,11 +642,14 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
   return {
     view,
     keyRejected,
+    prep: prepModel,
     session: sessionModel,
     results: resultsModel,
     actions: {
       submitKey,
       pickScenario,
+      startConversation,
+      backToPicker,
       toggleMic,
       changeMode,
       sendTyped,
