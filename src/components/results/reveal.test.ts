@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { GOAL_GIVE, START_GIVE } from "@/contracts/constants";
+import type { Mood, Turn } from "@/contracts/types";
 import { GIVE_HISTORY, MOOD_HISTORY, TURNS } from "./fixtures";
-import { buildGiveTimeline, outcomeLine } from "./reveal";
+import { LONG_PAUSE_MS, buildGiveTimeline, outcomeLine, pauseLabel } from "./reveal";
 
 describe("buildGiveTimeline", () => {
   it("plots one point per counterpart turn", () => {
@@ -60,5 +61,56 @@ describe("outcomeLine", () => {
     [30, "Their willingness ended at 30 out of 100, the same as where they started. They needed 80 to say yes."],
   ])("final %i", (final, copy) => {
     expect(outcomeLine({ final, start: 30, goal: 80 })).toBe(copy);
+  });
+});
+
+describe("pauses", () => {
+  const t = (speaker: Turn["speaker"], text: string, startedAtMs: number, endedAtMs: number): Turn => ({
+    speaker,
+    text,
+    startedAtMs,
+    endedAtMs,
+  });
+  // Their opening, then three user turns after 4.0s, 6.2s and 3.5s silences.
+  const turns: Turn[] = [
+    t("counterpart", "Hi.", 0, 1000),
+    t("user", "I want a raise.", 5000, 6000),
+    t("counterpart", "No budget.", 7000, 8000),
+    t("user", "Fair enough.", 14200, 15000),
+    t("counterpart", "Anything else?", 16000, 17000),
+    t("user", "I led the launch.", 20500, 21000),
+    t("counterpart", "Noted.", 22000, 23000),
+  ];
+  const give = [30, 30, 25, 25, 25, 25, 27];
+  const moods: Mood[] = ["neutral", "neutral", "guarded", "guarded", "impatient", "impatient", "neutral"];
+
+  it("flags long silences and whether they followed pushback", () => {
+    const steps = buildGiveTimeline(turns, give, moods).steps;
+    expect(steps.map((s) => s.pause)).toEqual([
+      { ms: 4000, afterPushback: false, thenGaveGround: false },
+      { ms: 6200, afterPushback: true, thenGaveGround: true },
+      { ms: 3500, afterPushback: true, thenGaveGround: false },
+    ]);
+    expect(steps.map((s) => (s.pause ? pauseLabel(s.pause) : null))).toEqual([
+      "Paused 4.0s before answering",
+      "Paused 6.2s after pushback, then gave ground",
+      "Paused 3.5s after pushback",
+    ]);
+  });
+
+  it("flags from exactly LONG_PAUSE_MS and ignores overlaps", () => {
+    const at = (gapMs: number) =>
+      buildGiveTimeline(
+        [t("counterpart", "Hi.", 0, 1000), t("user", "Hello.", 1000 + gapMs, 9000)],
+        [30, 30],
+        ["neutral", "neutral"],
+      ).steps[0]?.pause ?? null;
+    expect(at(LONG_PAUSE_MS - 1)).toBeNull();
+    expect(at(LONG_PAUSE_MS)).toMatchObject({ ms: LONG_PAUSE_MS });
+    expect(at(-500)).toBeNull();
+  });
+
+  it("has no long pauses in the shared fixture", () => {
+    expect(buildGiveTimeline(TURNS, GIVE_HISTORY, MOOD_HISTORY).steps.every((s) => s.pause === null)).toBe(true);
   });
 });

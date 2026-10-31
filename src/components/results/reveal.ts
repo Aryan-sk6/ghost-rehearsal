@@ -9,6 +9,20 @@ export interface GivePoint {
   mood: Mood;
 }
 
+/** A pause this long before the user answered gets flagged. */
+export const LONG_PAUSE_MS = 3000;
+
+const PUSHBACK_MOODS: ReadonlySet<Mood> = new Set(["guarded", "impatient", "irritated"]);
+
+/** A long silence before one of the user's turns. */
+export interface PauseNote {
+  ms: number;
+  /** Their reply just before it lowered give or turned guarded, impatient or irritated. */
+  afterPushback: boolean;
+  /** After pushback, the user then gave ground in this turn. */
+  thenGaveGround: boolean;
+}
+
 /** One of the user's turns and how their next reply moved. */
 export interface UserStep {
   turnIndex: number;
@@ -22,6 +36,8 @@ export interface UserStep {
   moodAfter: Mood | null;
   /** What the turn did (named a number, hedged, ...), from word matching. */
   checks: TurnCheck[];
+  /** Null unless the user waited at least LONG_PAUSE_MS before speaking. */
+  pause: PauseNote | null;
 }
 
 export interface GiveTimeline {
@@ -41,7 +57,7 @@ export interface GiveTimeline {
  * `moodHistory` hold one value per turn, as the engine stores them.
  */
 export function buildGiveTimeline(
-  turns: readonly Pick<Turn, "speaker" | "text">[],
+  turns: readonly Turn[],
   giveHistory: readonly number[],
   moodHistory: readonly Mood[],
 ): GiveTimeline {
@@ -60,6 +76,7 @@ export function buildGiveTimeline(
     const next = turns[i + 1];
     const replied = next?.speaker === "counterpart" && giveHistory[i + 1] !== undefined;
     const after = replied ? giveAt(i + 1) : null;
+    const checks = checkUserTurn(turn.text);
     steps.push({
       turnIndex: i,
       number: userCount,
@@ -68,7 +85,8 @@ export function buildGiveTimeline(
       after,
       delta: after === null ? null : after - before,
       moodAfter: replied ? (moodHistory[i + 1] ?? null) : null,
-      checks: checkUserTurn(turn.text),
+      checks,
+      pause: pauseBefore(turns, i, giveAt, moodHistory, checks),
     });
   });
 
@@ -97,6 +115,33 @@ export function buildGiveTimeline(
     bestTurnIndex,
     worstTurnIndex,
   };
+}
+
+function pauseBefore(
+  turns: readonly Turn[],
+  i: number,
+  giveAt: (i: number) => number,
+  moodHistory: readonly Mood[],
+  checks: readonly TurnCheck[],
+): PauseNote | null {
+  const previous = turns[i - 1];
+  const turn = turns[i];
+  if (previous?.speaker !== "counterpart" || turn === undefined) return null;
+  const ms = Math.max(0, turn.startedAtMs - previous.endedAtMs);
+  if (ms < LONG_PAUSE_MS) return null;
+  const giveBefore = i - 2 >= 0 ? giveAt(i - 2) : START_GIVE;
+  const mood = moodHistory[i - 1];
+  const afterPushback = giveAt(i - 1) < giveBefore || (mood !== undefined && PUSHBACK_MOODS.has(mood));
+  const gaveGround = checks.some((c) => c.kind === "concession");
+  return { ms, afterPushback, thenGaveGround: afterPushback && gaveGround };
+}
+
+/** Short label for a pause, e.g. "Paused 6.2s after pushback, then gave ground". */
+export function pauseLabel(pause: PauseNote): string {
+  const seconds = `${(pause.ms / 1000).toFixed(1)}s`;
+  if (pause.thenGaveGround) return `Paused ${seconds} after pushback, then gave ground`;
+  if (pause.afterPushback) return `Paused ${seconds} after pushback`;
+  return `Paused ${seconds} before answering`;
 }
 
 /** One plain sentence on where they ended up. */

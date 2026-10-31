@@ -1,9 +1,9 @@
 import { Card } from "@/components/ui/Card";
 import type { Mood, Turn } from "@/contracts/types";
-import { buildGiveTimeline, outcomeLine, type GiveTimeline, type UserStep } from "./reveal";
+import { buildGiveTimeline, outcomeLine, pauseLabel, type GiveTimeline, type UserStep } from "./reveal";
 
 export interface BehindTheScenesProps {
-  turns: readonly Pick<Turn, "speaker" | "text">[];
+  turns: readonly Turn[];
   giveHistory: readonly number[];
   moodHistory: readonly Mood[];
   hiddenBottomLine: string;
@@ -104,10 +104,20 @@ function DeltaBadge({ delta }: { delta: number | null }) {
   );
 }
 
-function CheckChips({ checks }: { checks: UserStep["checks"] }) {
-  if (checks.length === 0) return null;
+function CheckChips({ checks, pause }: Pick<UserStep, "checks" | "pause">) {
+  if (checks.length === 0 && pause === null) return null;
   return (
     <ul aria-label="What this turn did" className="flex flex-wrap gap-2">
+      {pause !== null ? (
+        <li
+          className={`rounded-full border px-2.5 py-0.5 text-xs ${
+            pause.thenGaveGround ? "border-warning/40 text-warning" : "border-line text-ink-muted"
+          }`}
+        >
+          <span aria-hidden="true">{pause.thenGaveGround ? "! " : "… "}</span>
+          {pauseLabel(pause)}
+        </li>
+      ) : null}
       {checks.map((check) => (
         <li
           key={check.kind}
@@ -139,7 +149,7 @@ function StepRow({ step, tag }: { step: UserStep; tag: string | null }) {
         </span>
       </div>
       <p className="text-ink">&ldquo;{step.text}&rdquo;</p>
-      <CheckChips checks={step.checks} />
+      <CheckChips checks={step.checks} pause={step.pause} />
     </li>
   );
 }
@@ -164,7 +174,7 @@ export function BehindTheScenes({ turns, giveHistory, moodHistory, hiddenBottomL
           <p className="text-sm text-ink-muted">
             This score was hidden while you talked. It goes up for clear, specific, calm asks and down for hedging or
             pushing too hard. The tags under each line are simple word checks: naming a number and giving a reason
-            help; hedging, apologising and giving ground hurt.
+            help; hedging, apologising and giving ground hurt. Silences of 3 seconds or more are marked too.
           </p>
         </div>
         <GiveChart timeline={timeline} />

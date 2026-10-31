@@ -190,3 +190,16 @@ describe("ResultsScreen reveal", () => {
     expect(section.getByText(SCENARIO.hiddenBottomLine)).toBeInTheDocument();
   });
 });
+
+describe("ResultsScreen pauses", () => {
+  it("tags a long pause after pushback that ended in giving ground", () => {
+    // Turn 3 ("Fair enough, never mind.") now starts 6.2s after their reply ended.
+    const turns = TURNS.map((t, i) => (i === 3 ? { ...t, startedAtMs: 4800 + 6200 } : t));
+    setup(READY, { turns });
+    const rows = Array.from(
+      screen.getByRole("list", { name: "How each of your turns moved them" }).children,
+    ) as HTMLElement[];
+    expect(rows[1]).toHaveTextContent("Paused 6.2s after pushback, then gave ground");
+    expect(rows[0]).not.toHaveTextContent("Paused");
+  });
+});
