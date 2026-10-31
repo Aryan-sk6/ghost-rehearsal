@@ -5,15 +5,25 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { BUILTIN_SCENARIOS } from "@/scenarios/builtins";
 import type { Scenario } from "@/contracts/types";
+import type { ScenarioSummary } from "@/lib/history";
 import { CustomScenarioBuilder } from "./CustomScenarioBuilder";
+import { ProgressList } from "./ProgressList";
 import { ScenarioCard } from "./ScenarioCard";
 
 export interface ScenarioPickerProps {
   onPick: (scenario: Scenario) => void;
   scenarios?: readonly Scenario[];
+  /** Earlier rehearsals, one row per scenario. */
+  progress?: readonly ScenarioSummary[];
+  onClearProgress?: () => void;
 }
 
-export function ScenarioPicker({ onPick, scenarios = BUILTIN_SCENARIOS }: ScenarioPickerProps) {
+export function ScenarioPicker({
+  onPick,
+  scenarios = BUILTIN_SCENARIOS,
+  progress = [],
+  onClearProgress = () => {},
+}: ScenarioPickerProps) {
   const [building, setBuilding] = useState(false);
 
   return (
@@ -21,6 +31,7 @@ export function ScenarioPicker({ onPick, scenarios = BUILTIN_SCENARIOS }: Scenar
       <h2 id="picker-heading" className="text-2xl font-semibold text-ink">
         Choose a conversation to rehearse
       </h2>
+      <ProgressList summaries={progress} onClear={onClearProgress} />
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {scenarios.map((scenario) => (
           <ScenarioCard key={scenario.id} scenario={scenario} onPick={onPick} />

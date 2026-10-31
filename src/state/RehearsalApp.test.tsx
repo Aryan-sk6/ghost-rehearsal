@@ -5,6 +5,7 @@ import { MIC_DENIED_COPY, VOICE_UNSUPPORTED_COPY } from "@/components/errors/err
 import { LlmError } from "@/contracts/errors";
 import { FakeLlmClient, FakeSpeechInput, FakeSpeechOutput, type FakeLlmStep } from "@/contracts/fakes";
 import type { SpeechBundle } from "@/contracts/speech";
+import { createMemoryHistoryStore } from "@/lib/history";
 import { BUILTIN_SCENARIOS } from "@/scenarios/builtins";
 import type { RehearsalDeps } from "./deps";
 import { RehearsalApp } from "./RehearsalApp";
@@ -202,6 +203,78 @@ describe("RehearsalApp", () => {
     await userEvent.click(screen.getByRole("button", { name: "Choose another" }));
     expect(screen.getByRole("heading", { name: "Choose a conversation to rehearse" })).toBeInTheDocument();
     expect(h.output.spoken).toHaveLength(3);
+  });
+
+  it("remembers each attempt, compares with last time, and clears on request", async () => {
+    const h = harness([
+      reply("Budgets are tight this year.", 40),
+      reply("Hmm, maybe.", 35),
+      reply("Sounds reasonable.", 50),
+      reply("Fair enough, let me check.", 62),
+    ]);
+    const history = createMemoryHistoryStore();
+    render(<RehearsalApp deps={{ ...h.deps, history }} />);
+    await enterKeyAndPick();
+    await say(h.input, "Sorry, maybe a raise?", "Budgets are tight this year.");
+    await say(h.input, "I think it's fair.", "Hmm, maybe.");
+    await userEvent.click(screen.getByRole("button", { name: "End conversation" }));
+
+    let card = within(await screen.findByRole("region", { name: "Compared with last time" }));
+    expect(card.getByText(/This is your first saved attempt/)).toBeInTheDocument();
+    expect(history.entries).toHaveLength(1);
+    expect(history.entries[0]?.finalGive).toBe(35);
+    expect(JSON.stringify(history.entries)).not.toContain("Sorry");
+    expect(JSON.stringify(history.entries)).not.toContain(KEY);
+
+    await userEvent.click(screen.getByRole("button", { name: "Practise another" }));
+    const progress = within(screen.getByRole("region", { name: "Your progress" }));
+    expect(progress.getByText(SALARY?.title ?? "")).toBeInTheDocument();
+    expect(progress.getByText("1 attempt · latest 35 · best 35")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: `Practise this: ${SALARY?.title}` }));
+    await userEvent.click(screen.getByRole("button", { name: "Start the conversation" }));
+    await waitFor(() => expect(screen.getByText("Your turn")).toBeInTheDocument());
+    await say(h.input, "I'd like 10% because I led the launch.", "Sounds reasonable.");
+    await say(h.input, "Can we agree 10% today?", "Fair enough, let me check.");
+    await userEvent.click(screen.getByRole("button", { name: "End conversation" }));
+
+    card = within(await screen.findByRole("region", { name: "Compared with last time" }));
+    expect(card.getByText("Attempt 2. They ended at 60 out of 100, up 25 from last time (35).")).toBeInTheDocument();
+    expect(card.getByText("Your best result yet.")).toBeInTheDocument();
+    expect(card.getByText("Named a number in 2 of 2 turns, last time 0 of 2 turns")).toBeInTheDocument();
+    expect(card.getByText("Hedged in 0 of 2 turns, last time 1 of 2 turns")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Practise another" }));
+    expect(screen.getByText("2 attempts · latest 60 · best 60")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Clear progress" }));
+    await userEvent.click(screen.getByRole("button", { name: "Keep it" }));
+    expect(history.entries).toHaveLength(2);
+    await userEvent.click(screen.getByRole("button", { name: "Clear progress" }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete progress" }));
+    expect(screen.queryByRole("region", { name: "Your progress" })).not.toBeInTheDocument();
+    expect(history.entries).toEqual([]);
+  });
+
+  it("loads earlier progress on start", async () => {
+    const h = harness([]);
+    const history = createMemoryHistoryStore([
+      {
+        key: "old",
+        scenarioId: SALARY?.id ?? "",
+        scenarioTitle: SALARY?.title ?? "",
+        endedAtMs: 1,
+        finalGive: 48,
+        goal: 80,
+        endReason: "user_ended",
+        userTurns: 3,
+        habits: { number: 1, reason: 0, hedge: 1, apology: 0, concession: 0 },
+        retry: false,
+      },
+    ]);
+    render(<RehearsalApp deps={{ ...h.deps, history }} />);
+    await userEvent.type(screen.getByLabelText("Anthropic API key"), KEY);
+    await userEvent.click(screen.getByRole("button", { name: "Start rehearsing" }));
+    expect(screen.getByText("1 attempt · latest 48 · best 48")).toBeInTheDocument();
   });
 
   it("shows no plan card when prep was left blank", async () => {

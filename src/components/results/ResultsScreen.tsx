@@ -4,6 +4,7 @@ import type { SessionError } from "@/components/session/SessionScreen";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import type { PrepPlan } from "@/lib/analysis";
+import type { HistoryEntry, ScenarioProgress } from "@/lib/history";
 import type {
   EndReason,
   Mood,
@@ -15,6 +16,7 @@ import type {
 import { BehindTheScenes } from "./BehindTheScenes";
 import { LostGroundList } from "./LostGroundList";
 import { PrepCard } from "./PrepCard";
+import { ProgressCard } from "./ProgressCard";
 import { RetryComparisonCard } from "./RetryComparisonCard";
 import type { RetrySnapshot } from "./reveal";
 import { MetricsPanel } from "./MetricsPanel";
@@ -38,6 +40,8 @@ export interface ResultsScreenProps {
   retry?: RetrySnapshot | null;
   /** What the user planned before starting, if anything. */
   plan?: PrepPlan | null;
+  /** This attempt as saved, with earlier attempts at the same scenario. */
+  progress?: { entry: HistoryEntry; progress: ScenarioProgress } | null;
   endReason: EndReason;
   metrics: SessionMetrics;
   analysis: AnalysisState;
@@ -66,6 +70,7 @@ export function ResultsScreen({
   moodHistory,
   retry = null,
   plan = null,
+  progress = null,
   endReason,
   metrics,
   analysis,
@@ -102,6 +107,8 @@ export function ResultsScreen({
       ) : null}
 
       {plan !== null ? <PrepCard plan={plan} turns={turns} /> : null}
+
+      {progress !== null ? <ProgressCard entry={progress.entry} progress={progress.progress} /> : null}
 
       {analysis.status === "loading" ? (
         <p role="status" className="text-ink-muted">

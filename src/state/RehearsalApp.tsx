@@ -14,7 +14,7 @@ export interface RehearsalAppProps {
 }
 
 export function RehearsalApp({ deps = browserDeps }: RehearsalAppProps) {
-  const { view, keyRejected, prep, session, results, actions } = useRehearsal(deps);
+  const { view, keyRejected, prep, history, session, results, actions } = useRehearsal(deps);
 
   if (view === "key") {
     return <ApiKeyForm onSubmit={actions.submitKey} rejected={keyRejected} />;
@@ -29,6 +29,7 @@ export function RehearsalApp({ deps = browserDeps }: RehearsalAppProps) {
         moodHistory={results.moodHistory}
         retry={results.retry}
         plan={results.plan}
+        progress={results.progress}
         endReason={results.endReason}
         metrics={results.metrics}
         analysis={results.analysis}
@@ -76,5 +77,5 @@ export function RehearsalApp({ deps = browserDeps }: RehearsalAppProps) {
     );
   }
 
-  return <ScenarioPicker onPick={actions.pickScenario} />;
+  return <ScenarioPicker onPick={actions.pickScenario} progress={history} onClearProgress={actions.clearHistory} />;
 }

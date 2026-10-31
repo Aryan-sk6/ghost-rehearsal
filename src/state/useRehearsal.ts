@@ -36,6 +36,15 @@ import {
   requestCounterpartReply,
 } from "@/lib/conversation";
 import { computeMetrics, hasPlan, replayFrom, requestAnalysis, type PrepPlan } from "@/lib/analysis";
+import {
+  addEntry,
+  entryFromSession,
+  progressFor,
+  summarizeByScenario,
+  type HistoryEntry,
+  type ScenarioProgress,
+  type ScenarioSummary,
+} from "@/lib/history";
 import { linkBargeIn } from "@/lib/speech";
 import type { RehearsalDeps } from "./deps";
 
@@ -65,6 +74,8 @@ export interface ResultsViewModel {
   retry: RetrySnapshot | null;
   /** What the user planned on the prep screen, if they wrote anything. */
   plan: PrepPlan | null;
+  /** This attempt as saved, and how it compares with earlier ones. Null if nothing is saved. */
+  progress: { entry: HistoryEntry; progress: ScenarioProgress } | null;
   endReason: EndReason;
   metrics: SessionMetrics;
   analysis: AnalysisState;
@@ -81,6 +92,7 @@ export interface RehearsalActions {
   pickScenario(scenario: Scenario): void;
   startConversation(plan: PrepPlan): void;
   backToPicker(): void;
+  clearHistory(): void;
   toggleMic(): void;
   changeMode(mode: SpeechMode): void;
   sendTyped(text: string): void;
@@ -96,6 +108,8 @@ export interface UseRehearsal {
   view: RehearsalView;
   keyRejected: boolean;
   prep: PrepViewModel | null;
+  /** One row per scenario practised, for the picker. */
+  history: ScenarioSummary[];
   session: SessionViewModel | null;
   results: ResultsViewModel | null;
   actions: RehearsalActions;
@@ -135,6 +149,8 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
   const [retrySnapshot, setRetrySnapshot] = useState<RetrySnapshot | null>(null);
   const [prepScenario, setPrepScenario] = useState<Scenario | null>(null);
   /** The plan from the latest start, kept so picking the same scenario again starts filled in. */
+  const [history, setHistory] = useState<HistoryEntry[]>(() => deps.history?.load() ?? []);
+  const [savedEntry, setSavedEntry] = useState<HistoryEntry | null>(null);
   const [lastPlan, setLastPlan] = useState<{ scenarioId: string; plan: PrepPlan } | null>(null);
 
   // Mutable mirrors, so long-lived callbacks never read stale render state.
@@ -150,6 +166,8 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
   const runRef = useRef(0);
   const pendingResumeRef = useRef<Resume>(null);
   const yourTurnSinceRef = useRef(0);
+  const historyRef = useRef(history);
+  const isRetryRef = useRef(false);
 
   const setPhase = useCallback((next: SessionPhase) => {
     phaseRef.current = next;
@@ -222,8 +240,20 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
     [getLlm],
   );
 
+  const remember = useCallback((ended: Session) => {
+    const store = depsRef.current.history;
+    if (store === undefined) return;
+    const entry = entryFromSession(ended, { endedAtMs: depsRef.current.now(), retry: isRetryRef.current });
+    const next = addEntry(historyRef.current, entry);
+    historyRef.current = next;
+    store.save(next);
+    setHistory(next);
+    setSavedEntry(entry);
+  }, []);
+
   const goToResults = useCallback(
     (ended: Session) => {
+      remember(ended);
       const computed = computeMetrics(ended);
       setMetrics(computed);
       setError(null);
@@ -233,7 +263,7 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
       setView("results");
       void runAnalysis(ended, computed);
     },
-    [runAnalysis, setPhase],
+    [remember, runAnalysis, setPhase],
   );
 
   const goToKeyScreen = useCallback(
@@ -400,6 +430,8 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
       setMetrics(null);
       setAnalysis({ status: "loading" });
       setRetrySnapshot(null);
+      isRetryRef.current = false;
+      setSavedEntry(null);
       openSpeech(modeRef.current);
 
       const created = createSession(scenario, {
@@ -552,6 +584,8 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
       }
       runRef.current += 1;
       busyRef.current = false;
+      isRetryRef.current = true;
+      setSavedEntry(null);
       setRetrySnapshot({
         turnIndex,
         turns: current.turns,
@@ -582,10 +616,19 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
     setMetrics(null);
     setAnalysis({ status: "loading" });
     setRetrySnapshot(null);
+    isRetryRef.current = false;
+    setSavedEntry(null);
     setPrepScenario(null);
     setPhase("idle");
     setView("picker");
   }, [commit, setPhase, teardownSpeech]);
+
+  const clearHistory = useCallback(() => {
+    historyRef.current = [];
+    depsRef.current.history?.save([]);
+    setHistory([]);
+    setSavedEntry(null);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -632,6 +675,7 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
           const plan = planFor(session.scenario.id);
           return hasPlan(plan) ? plan : null;
         })(),
+        progress: savedEntry === null ? null : { entry: savedEntry, progress: progressFor(history, savedEntry) },
         endReason: session.endReason ?? "user_ended",
         metrics,
         analysis,
@@ -643,6 +687,7 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
     view,
     keyRejected,
     prep: prepModel,
+    history: summarizeByScenario(history),
     session: sessionModel,
     results: resultsModel,
     actions: {
@@ -650,6 +695,7 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
       pickScenario,
       startConversation,
       backToPicker,
+      clearHistory,
       toggleMic,
       changeMode,
       sendTyped,

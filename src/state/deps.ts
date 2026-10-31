@@ -1,5 +1,6 @@
 import type { LlmClient } from "@/contracts/llm";
 import type { SpeechBundle, SpeechInputOptions } from "@/contracts/speech";
+import { createLocalHistoryStore, type HistoryStore } from "@/lib/history";
 import { createSpeech } from "@/lib/speech";
 import { createHttpLlmClient } from "@/lib/llm";
 
@@ -9,6 +10,8 @@ export interface RehearsalDeps {
   createSpeech(opts: SpeechInputOptions): SpeechBundle;
   now(): number;
   newId(): string;
+  /** Where finished rehearsals are remembered. Left out, nothing is saved. */
+  history?: HistoryStore;
 }
 
 /** Real browser wiring. Nothing here runs until a method is called, so `next build` can prerender. */
@@ -17,4 +20,5 @@ export const browserDeps: RehearsalDeps = {
   createSpeech: (opts) => createSpeech(opts),
   now: () => Date.now(),
   newId: () => crypto.randomUUID(),
+  history: createLocalHistoryStore(),
 };
