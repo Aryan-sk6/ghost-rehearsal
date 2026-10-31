@@ -58,6 +58,8 @@ export interface SessionViewModel {
 export interface ResultsViewModel {
   scenario: Scenario;
   turns: readonly Turn[];
+  giveHistory: readonly number[];
+  moodHistory: readonly Mood[];
   endReason: EndReason;
   metrics: SessionMetrics;
   analysis: AnalysisState;
@@ -572,6 +574,8 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
       resultsModel = {
         scenario: session.scenario,
         turns: session.turns,
+        giveHistory: session.giveHistory,
+        moodHistory: session.moodHistory,
         endReason: session.endReason ?? "user_ended",
         metrics,
         analysis,

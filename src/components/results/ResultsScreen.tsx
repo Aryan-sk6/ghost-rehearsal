@@ -5,11 +5,13 @@ import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import type {
   EndReason,
+  Mood,
   Scenario,
   SessionAnalysis,
   SessionMetrics,
   Turn,
 } from "@/contracts/types";
+import { BehindTheScenes } from "./BehindTheScenes";
 import { LostGroundList } from "./LostGroundList";
 import { MetricsPanel } from "./MetricsPanel";
 import { ScoreGrid } from "./ScoreGrid";
@@ -24,6 +26,10 @@ export type AnalysisState =
 export interface ResultsScreenProps {
   scenario: Scenario;
   turns: readonly Turn[];
+  /** Their hidden willingness after each turn, same length as turns. */
+  giveHistory: readonly number[];
+  /** Their mood after each turn, same length as turns. */
+  moodHistory: readonly Mood[];
   endReason: EndReason;
   metrics: SessionMetrics;
   analysis: AnalysisState;
@@ -48,6 +54,8 @@ export const TOO_SHORT_COPY =
 export function ResultsScreen({
   scenario,
   turns,
+  giveHistory,
+  moodHistory,
   endReason,
   metrics,
   analysis,
@@ -119,7 +127,12 @@ export function ResultsScreen({
         />
       ) : null}
 
-      <p className="text-ink">What they would have conceded: {scenario.hiddenBottomLine}</p>
+      <BehindTheScenes
+        turns={turns}
+        giveHistory={giveHistory}
+        moodHistory={moodHistory}
+        hiddenBottomLine={scenario.hiddenBottomLine}
+      />
 
       <div className="flex flex-wrap gap-3">
         <Button variant="secondary" size="lg" onClick={handleDownload}>

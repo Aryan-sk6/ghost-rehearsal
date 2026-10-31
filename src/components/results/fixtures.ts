@@ -1,5 +1,5 @@
 import { FILLER_PHRASES, HEDGE_PHRASES } from "@/contracts/constants";
-import type { Scenario, SessionAnalysis, SessionMetrics, Turn } from "@/contracts/types";
+import type { Mood, Scenario, SessionAnalysis, SessionMetrics, Turn } from "@/contracts/types";
 import { BUILTIN_SCENARIOS } from "@/scenarios/builtins";
 
 /** Test fixtures shared by the results tests. */
@@ -17,6 +17,18 @@ export const TURNS: Turn[] = [
   turn("counterpart", "Good to hear.", 8),
   turn("user", "Could we revisit in spring?", 10),
   turn("counterpart", "Perhaps.", 12),
+];
+
+/** Their willingness and mood after each of TURNS. */
+export const GIVE_HISTORY: number[] = [30, 30, 25, 25, 15, 15, 20];
+export const MOOD_HISTORY: Mood[] = [
+  "neutral",
+  "neutral",
+  "guarded",
+  "guarded",
+  "impatient",
+  "impatient",
+  "neutral",
 ];
 
 export const METRICS: SessionMetrics = {

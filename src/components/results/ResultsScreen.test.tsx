@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { describeLlmError } from "@/components/errors/errorCopy";
 import type { EndReason } from "@/contracts/types";
-import { ANALYSIS, METRICS, SCENARIO, TURNS } from "./fixtures";
+import { ANALYSIS, GIVE_HISTORY, METRICS, MOOD_HISTORY, SCENARIO, TURNS } from "./fixtures";
 import { ResultsScreen, type AnalysisState, type ResultsScreenProps } from "./ResultsScreen";
 
 const NOW = new Date(2026, 9, 23, 14, 30);
@@ -12,6 +12,8 @@ function setup(analysis: AnalysisState, overrides: Partial<ResultsScreenProps> =
   const props: ResultsScreenProps = {
     scenario: SCENARIO,
     turns: TURNS,
+    giveHistory: GIVE_HISTORY,
+    moodHistory: MOOD_HISTORY,
     endReason: "user_ended",
     metrics: METRICS,
     analysis,
@@ -56,9 +58,8 @@ describe("ResultsScreen", () => {
       expect(scores.getByText(label)).toBeInTheDocument();
       expect(scores.getByText(value)).toBeInTheDocument();
     }
-    expect(
-      screen.getByText(`What they would have conceded: ${SCENARIO.hiddenBottomLine}`),
-    ).toBeInTheDocument();
+    expect(screen.getByText("What they were ready to concede")).toBeInTheDocument();
+    expect(screen.getByText(SCENARIO.hiddenBottomLine)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -76,7 +77,8 @@ describe("ResultsScreen", () => {
 
   it("lists three moments with 1-based user turn numbers and quotes", () => {
     setup(READY);
-    expect(screen.getAllByText(/^Your turn \d$/).map((el) => el.textContent)).toEqual([
+    const lost = within(screen.getByRole("region", { name: "Where you lost ground" }));
+    expect(lost.getAllByText(/^Your turn \d$/).map((el) => el.textContent)).toEqual([
       "Your turn 1",
       "Your turn 2",
       "Your turn 3",
@@ -157,5 +159,29 @@ describe("ResultsScreen", () => {
     expect(downloads).toEqual(["ghost-rehearsal-salary-raise-20261023-1430.json|blob:fake"]);
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:fake");
     vi.unstubAllGlobals();
+  });
+});
+
+describe("ResultsScreen reveal", () => {
+  it("shows how willing they were, each turn's effect and the best and worst moves", () => {
+    setup(READY);
+    const section = within(screen.getByRole("region", { name: "What they were thinking" }));
+    expect(
+      section.getByText(
+        "Their willingness ended at 20 out of 100, down 10 from 30. They needed 80 to say yes.",
+      ),
+    ).toBeInTheDocument();
+    expect(section.getByRole("img", { name: /from 30 to 20 out of 100/ })).toBeInTheDocument();
+    const rows = within(section.getByRole("list", { name: "How each of your turns moved them" })).getAllByRole(
+      "listitem",
+    );
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toHaveTextContent("Down 5");
+    expect(rows[0]).toHaveTextContent("Then: Guarded");
+    expect(rows[1]).toHaveTextContent("Cost you most");
+    expect(rows[1]).toHaveTextContent("Down 10");
+    expect(rows[2]).toHaveTextContent("Best move");
+    expect(rows[2]).toHaveTextContent("Up 5");
+    expect(section.getByText(SCENARIO.hiddenBottomLine)).toBeInTheDocument();
   });
 });

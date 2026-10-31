@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MIC_DENIED_COPY, VOICE_UNSUPPORTED_COPY } from "@/components/errors/errorCopy";
@@ -102,8 +102,10 @@ describe("RehearsalApp", () => {
     expect(screen.getByText("7/10")).toBeInTheDocument();
     expect(screen.getByText("Words per minute")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Retry from here" })).toHaveLength(3);
-    expect(screen.getByText("Your turn 1")).toBeInTheDocument();
-    expect(screen.getByText("I would like a ten percent raise.")).toBeInTheDocument();
+    const lost = within(screen.getByRole("region", { name: "Where you lost ground" }));
+    expect(lost.getByText("Your turn 1")).toBeInTheDocument();
+    expect(lost.getByText("I would like a ten percent raise.")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "What they were thinking" })).toBeInTheDocument();
     expect(h.llm.calls.map((c) => c.purpose)).toEqual([
       "counterpart",
       "counterpart",
