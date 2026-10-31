@@ -1,3 +1,4 @@
+import { APIConnectionError } from "@anthropic-ai/sdk";
 import { API_KEY_HEADER, LLM_ERROR_HTTP_STATUS, type LlmRouteResponse } from "@/contracts/api";
 import type { LlmErrorKind } from "@/contracts/errors";
 import { LlmRequestSchema, MODEL_IDS, type LlmRequest } from "@/contracts/llm";
@@ -30,7 +31,11 @@ function statusOf(error: unknown): number | undefined {
   return undefined;
 }
 
-const CONNECTION_ERROR_NAMES = new Set(["APIConnectionError", "APIConnectionTimeoutError"]);
+/** The SDK's connection and timeout errors, or a raw `fetch` network failure. */
+function isConnectionError(error: unknown): boolean {
+  if (error instanceof APIConnectionError) return true;
+  return error instanceof TypeError && error.message === "fetch failed";
+}
 
 export function classifyError(error: unknown): LlmErrorKind {
   const status = statusOf(error);
@@ -38,9 +43,7 @@ export function classifyError(error: unknown): LlmErrorKind {
   if (status === 429) return "rate_limited";
   if (status === 503 || status === 529) return "overloaded";
   if (status === 400) return "bad_request";
-  if (status === undefined && error instanceof Error && CONNECTION_ERROR_NAMES.has(error.name)) {
-    return "network";
-  }
+  if (status === undefined && isConnectionError(error)) return "network";
   return "unknown";
 }
 

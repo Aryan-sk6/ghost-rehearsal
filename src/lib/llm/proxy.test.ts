@@ -1,8 +1,9 @@
+import Anthropic, { APIConnectionError, APIConnectionTimeoutError } from "@anthropic-ai/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API_KEY_HEADER, LLM_ERROR_HTTP_STATUS, LlmRouteResponseSchema } from "@/contracts/api";
 import type { LlmErrorKind } from "@/contracts/errors";
 import { MODEL_IDS, type LlmRequest } from "@/contracts/llm";
-import { handleLlmProxy } from "./proxy";
+import { classifyError, handleLlmProxy } from "./proxy";
 
 const KEY = "sk-ant-test-secret-123";
 const body: LlmRequest = {
@@ -94,8 +95,10 @@ describe("handleLlmProxy", () => {
     ["529", new StatusError(529), "overloaded"],
     ["400", new StatusError(400), "bad_request"],
     ["500", new StatusError(500), "unknown"],
-    ["connection error", new StatusError(undefined, "APIConnectionError"), "network"],
-    ["connection timeout", new StatusError(undefined, "APIConnectionTimeoutError"), "network"],
+    ["SDK connection error", new APIConnectionError({ message: "down" }), "network"],
+    ["SDK connection timeout", new APIConnectionTimeoutError(), "network"],
+    ["fetch failure", new TypeError("fetch failed"), "network"],
+    ["other TypeError", new TypeError("x is not a function"), "unknown"],
     ["plain error", new Error("boom"), "unknown"],
     ["non-error throw", "boom", "unknown"],
   ];
@@ -105,5 +108,29 @@ describe("handleLlmProxy", () => {
     });
     expect(status).toBe(LLM_ERROR_HTTP_STATUS[kind]);
     expect(parsed).toMatchObject({ ok: false, error: { kind } });
+  });
+});
+
+describe("classifyError with the real SDK", () => {
+  it("maps a failed connection to network", async () => {
+    // Node's fetch throws this TypeError when it cannot connect. The SDK
+    // wraps it itself, so this checks the error the proxy really receives.
+    const client = new Anthropic({
+      apiKey: "sk-ant-test",
+      maxRetries: 0,
+      dangerouslyAllowBrowser: true, // tests run in jsdom
+      fetch: async () => {
+        throw new TypeError("fetch failed");
+      },
+    });
+    const error = await client.messages
+      .create({ model: "x", max_tokens: 1, messages: [{ role: "user", content: "hi" }] })
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).name).toBe("Error");
+    expect(classifyError(error)).toBe("network");
   });
 });

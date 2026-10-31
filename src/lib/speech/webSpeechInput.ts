@@ -44,6 +44,12 @@ interface RecognitionLike {
 
 type RecognitionCtor = new () => RecognitionLike;
 
+/**
+ * After stop(), Chrome usually sends the final result for the last phrase
+ * and then ends. Wait this long for that end before emitting what we have.
+ */
+export const STOP_FLUSH_TIMEOUT_MS = 1000;
+
 function createEmitter<T>() {
   const listeners = new Set<(value: T) => void>();
   return {
@@ -104,6 +110,10 @@ export function createWebSpeechInput(
   let current: RecognitionLike | null = null;
   let silenceTimer: ReturnType<typeof setTimeout> | null = null;
   let noSpeechTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Set between stop() and Chrome's final end, while late results still count. */
+  let draining = false;
+  let drainTimer: ReturnType<typeof setTimeout> | null = null;
+  let stoppedAtMs = 0;
 
   // Utterance state. `carried` holds text from instances that Chrome ended
   // before the utterance was emitted; `consumed` is how many results of the
@@ -131,11 +141,11 @@ export function createWebSpeechInput(
     utteranceStarted = false;
   };
 
-  const flushUtterance = (): void => {
+  const flushUtterance = (endedAtMs: number = Date.now()): void => {
     const text = fullText();
     const startedAtMs = utteranceStartMs;
     resetUtterance();
-    if (text !== "") utterances.emit({ text, startedAtMs, endedAtMs: Date.now() });
+    if (text !== "") utterances.emit({ text, startedAtMs, endedAtMs });
   };
 
   const detach = (): void => {
@@ -158,6 +168,17 @@ export function createWebSpeechInput(
     } catch {
       // Already stopped; nothing to do.
     }
+  };
+
+  /** Ends a stop() that was waiting for Chrome's last results. */
+  const finishDrain = (): void => {
+    if (!draining) return;
+    draining = false;
+    if (drainTimer !== null) clearTimeout(drainTimer);
+    drainTimer = null;
+    detach();
+    flushUtterance(stoppedAtMs);
+    ends.emit("stopped");
   };
 
   const markSpeech = (): void => {
@@ -210,9 +231,17 @@ export function createWebSpeechInput(
         instanceText = parts.filter((p) => p !== "").join(" ");
         const text = fullText();
         if (text === "") return;
-        markSpeech();
+        if (draining) {
+          // Late words after release: keep them, but don't signal new speech.
+          if (!utteranceStarted) {
+            utteranceStarted = true;
+            utteranceStartMs = stoppedAtMs;
+          }
+        } else {
+          markSpeech();
+        }
         results.emit({ text, isFinal: allFinal, atMs: Date.now() });
-        if (mode === "continuous") {
+        if (mode === "continuous" && !draining) {
           if (silenceTimer !== null) clearTimeout(silenceTimer);
           silenceTimer = setTimeout(() => {
             silenceTimer = null;
@@ -222,6 +251,10 @@ export function createWebSpeechInput(
       };
       rec.onerror = (event) => {
         if (current !== rec) return;
+        if (draining) {
+          finishDrain();
+          return;
+        }
         const kind = mapErrorKind(event.error);
         if (kind === "no-speech") {
           // Chrome follows this with onend; we restart and our own timeout decides.
@@ -234,6 +267,10 @@ export function createWebSpeechInput(
       };
       rec.onend = () => {
         if (current !== rec) return;
+        if (draining) {
+          finishDrain();
+          return;
+        }
         if (!listening) return;
         // Chrome ended recognition on its own; keep the text and listen again.
         carried = fullText();
@@ -254,6 +291,7 @@ export function createWebSpeechInput(
     isListening: () => listening,
     start() {
       if (listening) return;
+      finishDrain();
       listening = true;
       carried = "";
       utteranceStarted = false;
@@ -267,9 +305,25 @@ export function createWebSpeechInput(
     },
     stop() {
       if (!listening) return;
-      halt();
-      flushUtterance();
-      ends.emit("stopped");
+      const rec = current;
+      listening = false;
+      clearTimers();
+      stoppedAtMs = Date.now();
+      if (!rec) {
+        flushUtterance(stoppedAtMs);
+        ends.emit("stopped");
+        return;
+      }
+      // Keep the handlers attached so the final result for the last phrase,
+      // which Chrome sends after stop(), still reaches the utterance.
+      draining = true;
+      rec.onspeechstart = null;
+      drainTimer = setTimeout(finishDrain, STOP_FLUSH_TIMEOUT_MS);
+      try {
+        rec.stop();
+      } catch {
+        finishDrain();
+      }
     },
     onResult: (cb) => results.on(cb),
     onUtterance: (cb) => utterances.on(cb),

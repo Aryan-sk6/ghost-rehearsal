@@ -7,7 +7,7 @@ import type {
   SpeechResult,
   Utterance,
 } from "@/contracts/speech";
-import { createWebSpeechInput } from "./webSpeechInput";
+import { STOP_FLUSH_TIMEOUT_MS, createWebSpeechInput } from "./webSpeechInput";
 
 interface FakeResult {
   t: string;
@@ -138,6 +138,9 @@ describe("push-to-talk", () => {
     vi.setSystemTime(900);
     input.stop();
     expect(rec().stopCalls).toBe(1);
+    expect(input.isListening()).toBe(false);
+    vi.setSystemTime(1100);
+    rec().emitEnd();
     expect(log.utterances).toEqual([
       { text: "hello there my friend", startedAtMs: 100, endedAtMs: 900 },
     ]);
@@ -149,6 +152,7 @@ describe("push-to-talk", () => {
     const { input, log } = setup({ mode: "push-to-talk" });
     input.start();
     input.stop();
+    rec().emitEnd();
     expect(log.utterances).toEqual([]);
     expect(log.ends).toEqual(["stopped"]);
   });
@@ -161,11 +165,56 @@ describe("push-to-talk", () => {
     expect(log.speechStarts).toBe(1);
   });
 
-  it("ignores late events after stop", () => {
+  it("keeps the final words Chrome delivers after stop", () => {
+    const { input, log } = setup({ mode: "push-to-talk" });
+    input.start();
+    const first = rec();
+    vi.setSystemTime(100);
+    first.emitResults([{ t: "I would like", final: false }]);
+    vi.setSystemTime(800);
+    input.stop();
+    expect(log.utterances).toEqual([]);
+    expect(log.ends).toEqual([]);
+    vi.setSystemTime(1000);
+    first.emitResults([{ t: "I would like a raise", final: true }]);
+    first.emitEnd();
+    expect(log.utterances).toEqual([
+      { text: "I would like a raise", startedAtMs: 100, endedAtMs: 800 },
+    ]);
+    expect(log.ends).toEqual(["stopped"]);
+    expect(log.speechStarts).toBe(1);
+    expect(FakeRecognition.instances).toHaveLength(1);
+  });
+
+  it("emits what it has if Chrome never ends after stop", () => {
+    const { input, log } = setup({ mode: "push-to-talk" });
+    input.start();
+    rec().emitResults([{ t: "almost done", final: false }]);
+    input.stop();
+    vi.advanceTimersByTime(STOP_FLUSH_TIMEOUT_MS - 1);
+    expect(log.utterances).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(log.utterances.map((u) => u.text)).toEqual(["almost done"]);
+    expect(log.ends).toEqual(["stopped"]);
+  });
+
+  it("treats an error after stop as the end, not a failure", () => {
+    const { input, log } = setup({ mode: "push-to-talk" });
+    input.start();
+    rec().emitResults([{ t: "hello", final: true }]);
+    input.stop();
+    rec().emitError("aborted");
+    expect(log.errors).toEqual([]);
+    expect(log.utterances.map((u) => u.text)).toEqual(["hello"]);
+    expect(log.ends).toEqual(["stopped"]);
+  });
+
+  it("ignores events after the stop has finished", () => {
     const { input, log } = setup({ mode: "push-to-talk" });
     input.start();
     const first = rec();
     input.stop();
+    first.emitEnd();
     first.emitResults([{ t: "late", final: true }]);
     first.emitEnd();
     first.emitError("network");
@@ -173,6 +222,23 @@ describe("push-to-talk", () => {
     expect(log.errors).toEqual([]);
     expect(log.ends).toEqual(["stopped"]);
     expect(FakeRecognition.instances).toHaveLength(1);
+  });
+
+  it("finishes the previous utterance when started again during the wait", () => {
+    const { input, log } = setup({ mode: "push-to-talk" });
+    input.start();
+    const first = rec();
+    first.emitResults([{ t: "first", final: true }]);
+    input.stop();
+    input.start();
+    expect(log.utterances.map((u) => u.text)).toEqual(["first"]);
+    expect(log.ends).toEqual(["stopped"]);
+    expect(input.isListening()).toBe(true);
+    first.emitResults([{ t: "stale", final: true }]);
+    rec().emitResults([{ t: "second", final: true }]);
+    input.stop();
+    rec().emitEnd();
+    expect(log.utterances.map((u) => u.text)).toEqual(["first", "second"]);
   });
 
   it("keeps text across a Chrome-initiated end and restart", () => {
@@ -187,6 +253,7 @@ describe("push-to-talk", () => {
     first.emitResults([{ t: "stale", final: true }]);
     rec().emitResults([{ t: "second part", final: true }]);
     input.stop();
+    rec().emitEnd();
     expect(log.utterances.map((u) => u.text)).toEqual(["first part second part"]);
     expect(log.ends).toEqual(["stopped"]);
   });
