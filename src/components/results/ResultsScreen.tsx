@@ -13,6 +13,8 @@ import type {
 } from "@/contracts/types";
 import { BehindTheScenes } from "./BehindTheScenes";
 import { LostGroundList } from "./LostGroundList";
+import { RetryComparisonCard } from "./RetryComparisonCard";
+import type { RetrySnapshot } from "./reveal";
 import { MetricsPanel } from "./MetricsPanel";
 import { ScoreGrid } from "./ScoreGrid";
 import { buildTranscriptExport, downloadJson, transcriptFilename } from "./transcriptExport";
@@ -30,6 +32,8 @@ export interface ResultsScreenProps {
   giveHistory: readonly number[];
   /** Their mood after each turn, same length as turns. */
   moodHistory: readonly Mood[];
+  /** Set when this attempt came from "Retry from here". */
+  retry?: RetrySnapshot | null;
   endReason: EndReason;
   metrics: SessionMetrics;
   analysis: AnalysisState;
@@ -56,6 +60,7 @@ export function ResultsScreen({
   turns,
   giveHistory,
   moodHistory,
+  retry = null,
   endReason,
   metrics,
   analysis,
@@ -86,6 +91,10 @@ export function ResultsScreen({
         <h2 className="text-2xl font-semibold text-ink">{scenario.title}</h2>
         <p className="text-ink-muted">{END_REASON_COPY[endReason]}</p>
       </header>
+
+      {retry !== null ? (
+        <RetryComparisonCard retry={retry} turns={turns} giveHistory={giveHistory} moodHistory={moodHistory} />
+      ) : null}
 
       {analysis.status === "loading" ? (
         <p role="status" className="text-ink-muted">

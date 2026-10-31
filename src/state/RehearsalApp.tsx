@@ -26,6 +26,7 @@ export function RehearsalApp({ deps = browserDeps }: RehearsalAppProps) {
         turns={results.turns}
         giveHistory={results.giveHistory}
         moodHistory={results.moodHistory}
+        retry={results.retry}
         endReason={results.endReason}
         metrics={results.metrics}
         analysis={results.analysis}

@@ -154,3 +154,60 @@ export function outcomeLine(timeline: Pick<GiveTimeline, "final" | "goal" | "sta
     moved === 0 ? "the same as where they started" : `${moved > 0 ? "up" : "down"} ${Math.abs(moved)} from ${start}`;
   return `Their willingness ended at ${final} out of 100, ${change}. They needed ${goal} to say yes.`;
 }
+
+/** The attempt a "Retry from here" started from, kept so the redo can be compared. */
+export interface RetrySnapshot {
+  turnIndex: number;
+  turns: readonly Turn[];
+  giveHistory: readonly number[];
+  moodHistory: readonly Mood[];
+}
+
+export interface RetryComparison {
+  before: UserStep;
+  /** Null when the user ended the redo before saying that turn again. */
+  after: UserStep | null;
+  /** How many more points the new line moved them; null if either had no reply. */
+  deltaChange: number | null;
+  /** Checks the new line has that the old one didn't, and the reverse. */
+  gained: TurnCheck[];
+  dropped: TurnCheck[];
+  finalBefore: number;
+  finalAfter: number;
+}
+
+/** Compares the retried turn against the same turn in the original attempt. */
+export function compareRetry(
+  original: RetrySnapshot,
+  turns: readonly Turn[],
+  giveHistory: readonly number[],
+  moodHistory: readonly Mood[],
+): RetryComparison | null {
+  const was = buildGiveTimeline(original.turns, original.giveHistory, original.moodHistory);
+  const now = buildGiveTimeline(turns, giveHistory, moodHistory);
+  const before = was.steps.find((s) => s.turnIndex === original.turnIndex);
+  if (before === undefined) return null;
+  const after = now.steps.find((s) => s.turnIndex === original.turnIndex) ?? null;
+  const kinds = (step: UserStep | null) => new Set(step?.checks.map((c) => c.kind) ?? []);
+  const beforeKinds = kinds(before);
+  const afterKinds = kinds(after);
+  return {
+    before,
+    after,
+    deltaChange:
+      after === null || after.delta === null || before.delta === null ? null : after.delta - before.delta,
+    gained: after === null ? [] : after.checks.filter((c) => !beforeKinds.has(c.kind)),
+    dropped: before.checks.filter((c) => !afterKinds.has(c.kind)),
+    finalBefore: was.final,
+    finalAfter: now.final,
+  };
+}
+
+/** One plain sentence on whether the new line worked better. */
+export function retryVerdict(c: Pick<RetryComparison, "after" | "deltaChange">): string {
+  if (c.after === null) return "You ended before saying this turn again.";
+  if (c.deltaChange === null) return "They didn't reply to one of the two lines, so there's no direct comparison.";
+  if (c.deltaChange > 0) return `Your new line moved them ${c.deltaChange} points more than before.`;
+  if (c.deltaChange < 0) return `Your new line moved them ${Math.abs(c.deltaChange)} points less than before.`;
+  return "Your new line had the same effect as before.";
+}

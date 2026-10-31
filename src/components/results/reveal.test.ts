@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import { GOAL_GIVE, START_GIVE } from "@/contracts/constants";
 import type { Mood, Turn } from "@/contracts/types";
 import { GIVE_HISTORY, MOOD_HISTORY, TURNS } from "./fixtures";
-import { LONG_PAUSE_MS, buildGiveTimeline, outcomeLine, pauseLabel } from "./reveal";
+import {
+  LONG_PAUSE_MS,
+  buildGiveTimeline,
+  compareRetry,
+  outcomeLine,
+  pauseLabel,
+  retryVerdict,
+} from "./reveal";
 
 describe("buildGiveTimeline", () => {
   it("plots one point per counterpart turn", () => {
@@ -112,5 +119,48 @@ describe("pauses", () => {
 
   it("has no long pauses in the shared fixture", () => {
     expect(buildGiveTimeline(TURNS, GIVE_HISTORY, MOOD_HISTORY).steps.every((s) => s.pause === null)).toBe(true);
+  });
+});
+
+describe("compareRetry", () => {
+  const original = { turnIndex: 3, turns: TURNS, giveHistory: GIVE_HISTORY, moodHistory: MOOD_HISTORY };
+  const redo = (text: string, give: number) => {
+    const turns: Turn[] = [
+      ...TURNS.slice(0, 3),
+      { speaker: "user", text, startedAtMs: 6000, endedAtMs: 6800 },
+      { speaker: "counterpart", text: "Okay.", startedAtMs: 8000, endedAtMs: 8800 },
+    ];
+    return compareRetry(original, turns, [...GIVE_HISTORY.slice(0, 4), give], [...MOOD_HISTORY.slice(0, 4), "open"]);
+  };
+
+  it("compares the redone turn with the original", () => {
+    // Before: "Fair enough, never mind." moved 25 -> 15 (down 10).
+    const c = redo("I'd like 10% because I led the launch.", 33);
+    expect(c?.before.text).toBe("Fair enough, never mind.");
+    expect(c?.after?.delta).toBe(8);
+    expect(c?.deltaChange).toBe(18);
+    expect(c?.gained.map((x) => x.kind)).toEqual(["number", "reason"]);
+    expect(c?.dropped.map((x) => x.kind)).toEqual(["concession"]);
+    expect(c?.finalBefore).toBe(20);
+    expect(c?.finalAfter).toBe(33);
+    expect(retryVerdict(c!)).toBe("Your new line moved them 18 points more than before.");
+  });
+
+  it("says when the new line did worse or the same", () => {
+    expect(retryVerdict(redo("Sorry, never mind.", 10)!)).toBe(
+      "Your new line moved them 5 points less than before.",
+    );
+    expect(retryVerdict(redo("Fine.", 15)!)).toBe("Your new line had the same effect as before.");
+  });
+
+  it("handles a redo that ended before the turn", () => {
+    const c = compareRetry(original, TURNS.slice(0, 3), GIVE_HISTORY.slice(0, 3), MOOD_HISTORY.slice(0, 3));
+    expect(c?.after).toBeNull();
+    expect(c?.deltaChange).toBeNull();
+    expect(retryVerdict(c!)).toBe("You ended before saying this turn again.");
+  });
+
+  it("returns null when the snapshot has no such user turn", () => {
+    expect(compareRetry({ ...original, turnIndex: 2 }, TURNS, GIVE_HISTORY, MOOD_HISTORY)).toBeNull();
   });
 });

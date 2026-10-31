@@ -126,6 +126,41 @@ describe("RehearsalApp", () => {
     expect(h.output.spoken).toHaveLength(4);
   });
 
+  it("compares a retried turn with the original after the redo ends", async () => {
+    const h = harness([
+      reply("Budgets are tight this year.", 40),
+      reply("I hear you, but it is hard.", 45),
+      reply("Let me think about that.", 55),
+      ANALYSIS_JSON,
+      reply("That is a fair case.", 52),
+    ]);
+    render(<RehearsalApp deps={h.deps} />);
+    await enterKeyAndPick();
+    await say(h.input, "I would like a ten percent raise.", "Budgets are tight this year.");
+    await say(h.input, "My results justify it.", "I hear you, but it is hard.");
+    await say(h.input, "Can we agree a number today?", "Let me think about that.");
+    await userEvent.click(screen.getByRole("button", { name: "End conversation" }));
+    expect(await screen.findByText("You held your ground early, then softened.")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /Your retry/ })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Retry from here" })[1] as HTMLElement);
+    await waitFor(() => expect(screen.getByText("Your turn")).toBeInTheDocument());
+    await say(h.input, "I'd like 10% because I led the launch.", "That is a fair case.");
+    await userEvent.click(screen.getByRole("button", { name: "End conversation" }));
+
+    const card = within(await screen.findByRole("region", { name: "Your retry of turn 2" }));
+    expect(card.getByText("Your new line moved them 7 points more than before.")).toBeInTheDocument();
+    expect(card.getByText("“My results justify it.”")).toBeInTheDocument();
+    expect(card.getByText("“I'd like 10% because I led the launch.”")).toBeInTheDocument();
+    expect(card.getByText("Started: named a number")).toBeInTheDocument();
+    expect(card.getByText("Started: gave a reason")).toBeInTheDocument();
+    expect(card.getByText("They ended at 52 out of 100 this time, 55 before.")).toBeInTheDocument();
+
+    // A new scenario forgets the retry.
+    await userEvent.click(screen.getByRole("button", { name: "Practise another" }));
+    expect(screen.queryByRole("region", { name: /Your retry/ })).not.toBeInTheDocument();
+  });
+
   it("never shows the hidden bottom line before results", async () => {
     const h = harness([reply("Budgets are tight this year.", 40)]);
     const { container } = render(<RehearsalApp deps={h.deps} />);

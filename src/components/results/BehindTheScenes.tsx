@@ -92,7 +92,7 @@ function GiveChart({ timeline }: { timeline: GiveTimeline }) {
   );
 }
 
-function DeltaBadge({ delta }: { delta: number | null }) {
+export function DeltaBadge({ delta }: { delta: number | null }) {
   if (delta === null) return <span className="text-sm text-ink-muted">No reply</span>;
   if (delta === 0) return <span className="text-sm text-ink-muted">No change</span>;
   const up = delta > 0;
@@ -104,7 +104,7 @@ function DeltaBadge({ delta }: { delta: number | null }) {
   );
 }
 
-function CheckChips({ checks, pause }: Pick<UserStep, "checks" | "pause">) {
+export function CheckChips({ checks, pause }: Pick<UserStep, "checks" | "pause">) {
   if (checks.length === 0 && pause === null) return null;
   return (
     <ul aria-label="What this turn did" className="flex flex-wrap gap-2">

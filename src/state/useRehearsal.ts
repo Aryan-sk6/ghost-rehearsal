@@ -7,6 +7,7 @@ import {
   describeLlmError,
 } from "@/components/errors/errorCopy";
 import type { AnalysisState } from "@/components/results/ResultsScreen";
+import type { RetrySnapshot } from "@/components/results/reveal";
 import type {
   InputKind,
   SessionError,
@@ -60,6 +61,8 @@ export interface ResultsViewModel {
   turns: readonly Turn[];
   giveHistory: readonly number[];
   moodHistory: readonly Mood[];
+  /** The attempt this one retried from, if it came from "Retry from here". */
+  retry: RetrySnapshot | null;
   endReason: EndReason;
   metrics: SessionMetrics;
   analysis: AnalysisState;
@@ -118,6 +121,7 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
   const [error, setError] = useState<SessionError | null>(null);
   const [metrics, setMetrics] = useState<SessionMetrics | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisState>({ status: "loading" });
+  const [retrySnapshot, setRetrySnapshot] = useState<RetrySnapshot | null>(null);
 
   // Mutable mirrors, so long-lived callbacks never read stale render state.
   const sessionRef = useRef<Session | null>(null);
@@ -371,6 +375,7 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
       setInterimText("");
       setMetrics(null);
       setAnalysis({ status: "loading" });
+      setRetrySnapshot(null);
       openSpeech(modeRef.current);
 
       const created = createSession(scenario, {
@@ -513,6 +518,12 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
       }
       runRef.current += 1;
       busyRef.current = false;
+      setRetrySnapshot({
+        turnIndex,
+        turns: current.turns,
+        giveHistory: current.giveHistory,
+        moodHistory: current.moodHistory,
+      });
       commit(rewound);
       setError(null);
       setSpeakingText(null);
@@ -536,6 +547,7 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
     setInterimText("");
     setMetrics(null);
     setAnalysis({ status: "loading" });
+    setRetrySnapshot(null);
     setPhase("idle");
     setView("picker");
   }, [commit, setPhase, teardownSpeech]);
@@ -576,6 +588,7 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
         turns: session.turns,
         giveHistory: session.giveHistory,
         moodHistory: session.moodHistory,
+        retry: retrySnapshot,
         endReason: session.endReason ?? "user_ended",
         metrics,
         analysis,
