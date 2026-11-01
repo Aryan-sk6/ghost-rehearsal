@@ -9,6 +9,8 @@ export const LOST_GROUND_MOMENTS = 3;
 
 export const SILENCE_TIMEOUT_MS = 1500;
 export const NO_SPEECH_TIMEOUT_MS = 8000;
+/** After this long talking without a break, the counterpart cuts in with a ready-made line. */
+export const CUT_IN_AFTER_MS = 40_000;
 
 const MAX_GIVE_DELTAS = [25, 20, 15, 11, 8] as const;
 

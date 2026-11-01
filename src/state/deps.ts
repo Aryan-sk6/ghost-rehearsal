@@ -12,6 +12,8 @@ export interface RehearsalDeps {
   newId(): string;
   /** Where finished rehearsals are remembered. Left out, nothing is saved. */
   history?: HistoryStore;
+  /** How long the user can talk without a break before being cut in on. Default CUT_IN_AFTER_MS. */
+  cutInAfterMs?: number;
 }
 
 /** Real browser wiring. Nothing here runs until a method is called, so `next build` can prerender. */

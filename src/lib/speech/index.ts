@@ -4,6 +4,8 @@ export { createWebSpeechInput } from "./webSpeechInput";
 export { createTypedTextInput } from "./typedInput";
 export { createSpeech } from "./createSpeech";
 export { linkBargeIn } from "./bargeIn";
+export { createSpeechQueue } from "./speechQueue";
+export type { SpeechQueue } from "./speechQueue";
 
 export type {
   CreateSpeech,

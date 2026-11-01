@@ -21,10 +21,17 @@ export const LlmRequestSchema = z.object({
   messages: z.array(LlmMessageSchema).min(1).max(50),
   maxTokens: z.number().int().min(1).max(4096),
   temperature: z.number().min(0).max(1).optional(),
+  /** Ask the route to send text as it is written (see LLM_STREAM_CONTENT_TYPE). */
+  stream: z.boolean().optional(),
 });
 export type LlmRequest = z.infer<typeof LlmRequestSchema>;
 
 /** Resolves with the model's text. Rejects only with LlmError. */
 export interface LlmClient {
   complete(req: LlmRequest): Promise<string>;
+  /**
+   * Like complete(), but calls onText with each piece of text as it arrives.
+   * Optional: callers fall back to complete() when it is missing.
+   */
+  stream?(req: LlmRequest, onText: (text: string) => void): Promise<string>;
 }

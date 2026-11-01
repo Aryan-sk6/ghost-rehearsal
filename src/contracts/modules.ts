@@ -20,7 +20,18 @@ export interface TurnTiming {
 export type CreateSession = (scenario: Scenario, opts: { id: string; nowMs: number }) => Session;
 export type AddOpeningTurn = (session: Session, timing: TurnTiming) => Session;
 export type AddUserTurn = (session: Session, text: string, timing: TurnTiming) => Session;
-export type RequestCounterpartReply = (session: Session, llm: LlmClient) => Promise<CounterpartReply>;
+export interface CounterpartReplyOptions {
+  /**
+   * Called with each piece of the reply as soon as it is safe to say aloud,
+   * before the whole reply has arrived. Pieces come in order and never repeat.
+   */
+  onSpeakable?: (text: string) => void;
+}
+export type RequestCounterpartReply = (
+  session: Session,
+  llm: LlmClient,
+  opts?: CounterpartReplyOptions,
+) => Promise<CounterpartReply>;
 export type AddCounterpartTurn = (session: Session, reply: CounterpartReply, timing: TurnTiming) => Session;
 export type EndSession = (session: Session, nowMs: number) => Session;
 export type CurrentGive = (session: Session) => number;

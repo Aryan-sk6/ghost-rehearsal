@@ -180,3 +180,50 @@ export class FakeSpeechOutput implements SpeechOutput {
     pending.resolve({ startedAtMs: pending.startedAtMs, endedAtMs: this.now(), cancelled });
   }
 }
+
+/** One streamed reply: the text in pieces, optionally cut off by an error after the last piece. */
+export interface FakeStreamStep {
+  pieces: readonly string[];
+  failAfter?: LlmError;
+}
+
+/**
+ * Scripted streaming LLM. stream() hands out each step's pieces one at a time,
+ * yielding between them, and logs them to `log` so tests can check ordering.
+ */
+export class FakeStreamingLlmClient implements LlmClient {
+  readonly calls: LlmRequest[] = [];
+  readonly log: string[] = [];
+  private readonly steps: (FakeStreamStep | LlmError)[];
+
+  constructor(steps: readonly (FakeStreamStep | LlmError)[]) {
+    this.steps = [...steps];
+  }
+
+  async complete(req: LlmRequest): Promise<string> {
+    return this.stream(req, () => undefined);
+  }
+
+  async stream(req: LlmRequest, onText: (text: string) => void): Promise<string> {
+    this.calls.push(req);
+    const next = this.steps.shift();
+    if (next === undefined) throw new LlmError("unknown", "FakeStreamingLlmClient: script exhausted");
+    if (next instanceof LlmError) throw next;
+    let text = "";
+    for (const piece of next.pieces) {
+      await Promise.resolve();
+      this.log.push(`piece:${piece}`);
+      text += piece;
+      onText(piece);
+    }
+    if (next.failAfter) throw next.failAfter;
+    return text;
+  }
+}
+
+/** Splits text into pieces of `size` characters, the way a stream might deliver it. */
+export function chunk(text: string, size: number): string[] {
+  const pieces: string[] = [];
+  for (let i = 0; i < text.length; i += size) pieces.push(text.slice(i, i + size));
+  return pieces;
+}

@@ -14,7 +14,7 @@ import type {
   SessionPhase,
   TranscriptTurn,
 } from "@/components/session/SessionScreen";
-import { MIN_USER_TURNS_FOR_ANALYSIS } from "@/contracts/constants";
+import { CUT_IN_AFTER_MS, MIN_USER_TURNS_FOR_ANALYSIS } from "@/contracts/constants";
 import { LlmError, RehearsalError } from "@/contracts/errors";
 import type { LlmClient } from "@/contracts/llm";
 import type { SpeechBundle, SpeechError, SpeechMode, Unsubscribe, Utterance } from "@/contracts/speech";
@@ -32,6 +32,7 @@ import {
   addUserTurn,
   countUserTurns,
   createSession,
+  cutInReply,
   endSession,
   requestCounterpartReply,
 } from "@/lib/conversation";
@@ -45,7 +46,7 @@ import {
   type ScenarioProgress,
   type ScenarioSummary,
 } from "@/lib/history";
-import { linkBargeIn } from "@/lib/speech";
+import { createSpeechQueue, linkBargeIn, type SpeechQueue } from "@/lib/speech";
 import type { RehearsalDeps } from "./deps";
 
 export type RehearsalView = "key" | "picker" | "prep" | "session" | "results";
@@ -168,6 +169,11 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
   const yourTurnSinceRef = useRef(0);
   const historyRef = useRef(history);
   const isRetryRef = useRef(false);
+  /** The reply being spoken right now, piece by piece. */
+  const queueRef = useRef<SpeechQueue | null>(null);
+  const cutInTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Set when the cut-in timer stopped the mic, so the utterance that follows gets cut in on. */
+  const cutInDueRef = useRef(false);
 
   const setPhase = useCallback((next: SessionPhase) => {
     phaseRef.current = next;
@@ -186,10 +192,31 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
     return llmRef.current;
   }, []);
 
+  const clearCutIn = useCallback(() => {
+    if (cutInTimerRef.current !== null) clearTimeout(cutInTimerRef.current);
+    cutInTimerRef.current = null;
+  }, []);
+
+  /** Starts the clock when the user starts talking; at the limit, the mic is stopped and they get cut in on. */
+  const armCutIn = useCallback(() => {
+    clearCutIn();
+    cutInDueRef.current = false;
+    if (busyRef.current || sessionRef.current?.status !== "awaiting_user") return;
+    const run = runRef.current;
+    cutInTimerRef.current = setTimeout(() => {
+      cutInTimerRef.current = null;
+      const input = bundleRef.current?.input;
+      if (run !== runRef.current || busyRef.current || !input?.isListening()) return;
+      cutInDueRef.current = true;
+      input.stop();
+    }, depsRef.current.cutInAfterMs ?? CUT_IN_AFTER_MS);
+  }, [clearCutIn]);
+
   const detach = useCallback(() => {
+    clearCutIn();
     for (const unsub of unsubsRef.current) unsub();
     unsubsRef.current = [];
-  }, []);
+  }, [clearCutIn]);
 
   const teardownSpeech = useCallback(() => {
     detach();
@@ -279,16 +306,36 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
   // ---- the counterpart's turn ----
 
   const counterpartStep = useCallback(
-    async (current: Session) => {
+    async (current: Session, opts: { cutIn?: boolean } = {}) => {
       const run = runRef.current;
       busyRef.current = true;
       setError(null);
       setPhase("thinking");
+      const queue = createSpeechQueue(bundleRef.current?.output, depsRef.current.now);
+      queueRef.current = queue;
+      let said = "";
+      // Each safe piece is spoken as soon as it arrives, while the rest is still being written.
+      const speakable = (text: string) => {
+        if (run !== runRef.current) {
+          queue.stop();
+          return;
+        }
+        if (said === "") setPhase("speaking");
+        said = said === "" ? text : `${said} ${text}`;
+        setSpeakingText(said);
+        queue.push(text);
+      };
       let reply;
       try {
-        reply = await requestCounterpartReply(current, getLlm());
+        if (opts.cutIn === true) {
+          reply = cutInReply(current);
+          speakable(reply.reply);
+        } else {
+          reply = await requestCounterpartReply(current, getLlm(), { onSpeakable: speakable });
+        }
       } catch (caught) {
         if (run !== runRef.current) return;
+        queueRef.current = null;
         busyRef.current = false;
         if (isKeyProblem(caught)) {
           setPhase("idle");
@@ -300,14 +347,10 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
         return;
       }
       if (run !== runRef.current) return;
-
-      const output = bundleRef.current?.output;
-      setPhase("speaking");
-      setSpeakingText(reply.reply);
-      const spoken = output
-        ? await output.speak(reply.reply)
-        : { startedAtMs: depsRef.current.now(), endedAtMs: depsRef.current.now(), cancelled: false };
+      if (said === "") speakable(reply.reply);
+      const spoken = await queue.done();
       if (run !== runRef.current) return;
+      queueRef.current = null;
 
       const next = addCounterpartTurn(current, reply, {
         startedAtMs: spoken.startedAtMs,
@@ -321,6 +364,9 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
         goToResults(next);
         return;
       }
+      // The cut-in stopped the mic; in continuous mode, carry on listening.
+      const input = bundleRef.current?.input;
+      if (opts.cutIn === true && modeRef.current === "continuous" && input && !input.isListening()) input.start();
       markYourTurn(idlePhase());
     },
     [commit, getLlm, goToKeyScreen, goToResults, idlePhase, markYourTurn, setPhase],
@@ -328,6 +374,9 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
 
   const handleUserText = useCallback(
     (text: string, timing: { startedAtMs: number; endedAtMs: number }) => {
+      const cutIn = cutInDueRef.current;
+      cutInDueRef.current = false;
+      clearCutIn();
       const current = sessionRef.current;
       if (busyRef.current || current === null || current.status !== "awaiting_user") return;
       if (text.trim() === "") {
@@ -342,9 +391,9 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
       }
       setInterimText("");
       commit(next);
-      void counterpartStep(next);
+      void counterpartStep(next, { cutIn });
     },
-    [commit, counterpartStep, setPhase],
+    [clearCutIn, commit, counterpartStep, setPhase],
   );
 
   // ---- speech wiring ----
@@ -375,6 +424,11 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
       const { input, output } = bundle;
       unsubsRef.current = [
         linkBargeIn(input, output),
+        input.onSpeechStart(() => {
+          // Talking over the gap between two sentences also stops the rest of the reply.
+          if (queueRef.current?.hasStarted() === true) queueRef.current.stop();
+          armCutIn();
+        }),
         input.onResult((result) => setInterimText(result.text)),
         input.onUtterance((utterance: Utterance) =>
           handleUserText(utterance.text, {
@@ -384,12 +438,13 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
         ),
         input.onError(handleSpeechError),
         input.onEnd(() => {
+          clearCutIn();
           setInterimText("");
           if (!busyRef.current && phaseRef.current === "listening") setPhase("your-turn");
         }),
       ];
     },
-    [handleSpeechError, handleUserText, setPhase],
+    [armCutIn, clearCutIn, handleSpeechError, handleUserText, setPhase],
   );
 
   const openSpeech = useCallback(
@@ -505,6 +560,7 @@ export function useRehearsal(deps: RehearsalDeps): UseRehearsal {
       return;
     }
     if (bundle.output.isSpeaking()) bundle.output.cancel();
+    queueRef.current?.stop();
     setInterimText("");
     bundle.input.start();
     setPhase("listening");

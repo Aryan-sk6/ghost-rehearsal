@@ -133,4 +133,58 @@ describe("classifyError with the real SDK", () => {
     expect((error as Error).name).toBe("Error");
     expect(classifyError(error)).toBe("network");
   });
+
+  describe("streaming", () => {
+    const streamReq = () => request({ body: { ...body, stream: true } });
+    async function* pieces(parts: readonly string[], fail?: unknown) {
+      for (const p of parts) yield p;
+      if (fail !== undefined) throw fail;
+    }
+    const lines = async (res: Response) => {
+      const text = await res.text();
+      expect(text).not.toContain(KEY);
+      for (const s of spies) expect(JSON.stringify(s.mock.calls)).not.toContain(KEY);
+      return text.trim().split("\n").map((l) => JSON.parse(l) as unknown);
+    };
+
+    it("sends text line by line, then done", async () => {
+      const stream = vi.fn(() => pieces(["Hel", "lo"]));
+      const res = await handleLlmProxy(streamReq(), { complete: never, stream });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("application/x-ndjson");
+      expect(await lines(res)).toEqual([
+        { type: "text", text: "Hel" },
+        { type: "text", text: "lo" },
+        { type: "done" },
+      ]);
+      expect(stream).toHaveBeenCalledWith(KEY, MODEL_IDS.counterpart, { ...body, stream: true });
+    });
+
+    it("keeps the usual status and JSON body for a failure before any text", async () => {
+      const res = await handleLlmProxy(streamReq(), {
+        complete: never,
+        stream: () => pieces([], new StatusError(401)),
+      });
+      expect(res.status).toBe(401);
+      const text = await res.text();
+      expect(text).not.toContain(KEY);
+      expect(LlmRouteResponseSchema.parse(JSON.parse(text))).toMatchObject({ ok: false, error: { kind: "invalid_key" } });
+    });
+
+    it("ends with an error line when the model fails mid-reply", async () => {
+      const res = await handleLlmProxy(streamReq(), {
+        complete: never,
+        stream: () => pieces(["Hi"], new StatusError(529)),
+      });
+      expect(await lines(res)).toEqual([
+        { type: "text", text: "Hi" },
+        { type: "error", error: { kind: "overloaded", message: "The model is overloaded right now." } },
+      ]);
+    });
+
+    it("answers normally when streaming isn't available", async () => {
+      const { parsed } = await run(streamReq(), async () => "whole");
+      expect(parsed).toEqual({ ok: true, text: "whole" });
+    });
+  });
 });

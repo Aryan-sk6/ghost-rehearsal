@@ -3,7 +3,15 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MIC_DENIED_COPY, VOICE_UNSUPPORTED_COPY } from "@/components/errors/errorCopy";
 import { LlmError } from "@/contracts/errors";
-import { FakeLlmClient, FakeSpeechInput, FakeSpeechOutput, type FakeLlmStep } from "@/contracts/fakes";
+import {
+  FakeLlmClient,
+  FakeSpeechInput,
+  FakeSpeechOutput,
+  FakeStreamingLlmClient,
+  chunk,
+  type FakeLlmStep,
+} from "@/contracts/fakes";
+import { CUT_IN_LINES } from "@/lib/conversation";
 import type { SpeechBundle } from "@/contracts/speech";
 import { createMemoryHistoryStore } from "@/lib/history";
 import { BUILTIN_SCENARIOS } from "@/scenarios/builtins";
@@ -422,5 +430,63 @@ describe("RehearsalApp", () => {
     act(() => input.emitSpeechStart());
     expect(output.cancelCalls).toBe(1);
     await waitFor(() => expect(screen.getByText("Your turn")).toBeInTheDocument());
+  });
+
+  it("starts speaking a streamed reply sentence by sentence", async () => {
+    const llm = new FakeStreamingLlmClient([
+      { pieces: chunk(reply("Fine. Tell me why you deserve it.", 40), 5) },
+    ]);
+    const input = new FakeSpeechInput();
+    const output = new FakeSpeechOutput({ autoFinish: false });
+    const deps: RehearsalDeps = {
+      createLlm: () => llm,
+      createSpeech: () => ({ input, output, support: { recognition: true, synthesis: true } }),
+      now: () => 0,
+      newId: () => "s1",
+    };
+    render(<RehearsalApp deps={deps} />);
+    await userEvent.type(screen.getByLabelText("Anthropic API key"), KEY);
+    await userEvent.click(screen.getByRole("button", { name: "Start rehearsing" }));
+    await userEvent.click(screen.getByRole("button", { name: `Practise this: ${SALARY?.title}` }));
+    await userEvent.click(screen.getByRole("button", { name: "Start the conversation" }));
+    await waitFor(() => expect(output.isSpeaking()).toBe(true));
+    act(() => output.finish());
+    await waitFor(() => expect(screen.getByText("Your turn")).toBeInTheDocument());
+
+    act(() => input.emitUtterance({ text: "I want a raise.", startedAtMs: 0, endedAtMs: 1 }));
+    await waitFor(() => expect(output.spoken[1]).toBe("Fine."));
+    act(() => output.finish());
+    await waitFor(() => expect(output.spoken[2]).toBe("Tell me why you deserve it."));
+    act(() => output.finish());
+    expect(await screen.findByText("Fine. Tell me why you deserve it.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Your turn")).toBeInTheDocument());
+    expect(llm.calls).toHaveLength(1);
+  });
+
+  it("cuts in with a ready-made line after a long ramble, without asking the model", async () => {
+    const h = harness([reply("Go on then.", 35)]);
+    render(<RehearsalApp deps={{ ...h.deps, cutInAfterMs: 30 }} />);
+    await enterKeyAndPick();
+
+    // A short turn gets a normal reply.
+    await userEvent.click(screen.getByRole("button", { name: "Tap to speak" }));
+    act(() => h.input.emitSpeechStart());
+    act(() => {
+      h.input.emitUtterance({ text: "I want a raise.", startedAtMs: 0, endedAtMs: 1 });
+      h.input.emitEnd("stopped");
+    });
+    expect(await screen.findByText("Go on then.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Your turn")).toBeInTheDocument());
+    expect(h.input.stopCalls).toBe(0);
+
+    // A long one gets stopped and cut in on.
+    await userEvent.click(screen.getByRole("button", { name: "Tap to speak" }));
+    act(() => h.input.emitSpeechStart());
+    await waitFor(() => expect(h.input.stopCalls).toBe(1));
+    act(() => h.input.emitUtterance({ text: "So, well, there is a lot to say...", startedAtMs: 0, endedAtMs: 1 }));
+    expect(await screen.findByText(CUT_IN_LINES[0])).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Your turn")).toBeInTheDocument());
+    expect(h.llm.calls).toHaveLength(1);
+    expect(h.output.spoken.at(-1)).toBe(CUT_IN_LINES[0]);
   });
 });

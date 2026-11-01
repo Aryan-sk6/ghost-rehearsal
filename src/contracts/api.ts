@@ -31,6 +31,19 @@ export const LlmRouteResponseSchema = z.discriminatedUnion("ok", [
 ]);
 export type LlmRouteResponse = z.infer<typeof LlmRouteResponseSchema>;
 
+/**
+ * A streamed reply is newline-delimited JSON, one LlmStreamEvent per line.
+ * Failures before any text arrive are sent as a normal JSON LlmRouteFailure instead.
+ */
+export const LLM_STREAM_CONTENT_TYPE = "application/x-ndjson";
+
+export const LlmStreamEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("text"), text: z.string() }),
+  z.object({ type: z.literal("done") }),
+  z.object({ type: z.literal("error"), error: LlmRouteFailureSchema.shape.error }),
+]);
+export type LlmStreamEvent = z.infer<typeof LlmStreamEventSchema>;
+
 /** HTTP status the route returns for each failure kind. Success is 200. */
 export const LLM_ERROR_HTTP_STATUS: Readonly<Record<LlmErrorKind, number>> = {
   missing_key: 401,

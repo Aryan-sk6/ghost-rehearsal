@@ -93,4 +93,68 @@ describe("createHttpLlmClient", () => {
     const err = await failureOf(async () => json({ ok: "maybe" }));
     expect(err.kind).toBe("unknown");
   });
+
+  describe("stream", () => {
+    const ndjson = (lines: readonly string[], cut = 7) => {
+      const all = new TextEncoder().encode(lines.join(""));
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          // Split mid-line on purpose, the way chunks arrive over the network.
+          for (let i = 0; i < all.length; i += cut) controller.enqueue(all.slice(i, i + cut));
+          controller.close();
+        },
+      });
+      return new Response(body, { headers: { "content-type": "application/x-ndjson" } });
+    };
+    const ev = (e: unknown) => `${JSON.stringify(e)}\n`;
+
+    it("asks for a stream and passes text on piece by piece", async () => {
+      const fetchImpl = vi.fn(async () =>
+        ndjson([ev({ type: "text", text: "Hel" }), ev({ type: "text", text: "lo é" }), ev({ type: "done" })]),
+      );
+      const pieces: string[] = [];
+      const client = createHttpLlmClient({ apiKey: KEY, fetchImpl });
+      await expect(client.stream?.(req, (t) => pieces.push(t))).resolves.toBe("Hello é");
+      expect(pieces).toEqual(["Hel", "lo é"]);
+      const init = (fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1];
+      expect(JSON.parse(init.body as string)).toEqual({ ...req, stream: true });
+      expectNoKeyLogged();
+    });
+
+    it("reads a plain JSON failure sent before any text", async () => {
+      const fetchImpl = vi.fn(async () =>
+        json({ ok: false, error: { kind: "invalid_key", message: "rejected" } }, 401),
+      );
+      const client = createHttpLlmClient({ apiKey: KEY, fetchImpl });
+      await expect(client.stream?.(req, () => undefined)).rejects.toMatchObject({ kind: "invalid_key" });
+    });
+
+    it("reads a plain JSON reply from a server that doesn't stream", async () => {
+      const fetchImpl = vi.fn(async () => json({ ok: true, text: "all at once" }));
+      const pieces: string[] = [];
+      const client = createHttpLlmClient({ apiKey: KEY, fetchImpl });
+      await expect(client.stream?.(req, (t) => pieces.push(t))).resolves.toBe("all at once");
+      expect(pieces).toEqual(["all at once"]);
+    });
+
+    it("throws the error the server sent mid-stream", async () => {
+      const fetchImpl = vi.fn(async () =>
+        ndjson([ev({ type: "text", text: "Hi" }), ev({ type: "error", error: { kind: "overloaded", message: "busy" } })]),
+      );
+      const client = createHttpLlmClient({ apiKey: KEY, fetchImpl });
+      await expect(client.stream?.(req, () => undefined)).rejects.toMatchObject({ kind: "overloaded" });
+    });
+
+    it("treats a stream that ends without done as a dropped connection", async () => {
+      const fetchImpl = vi.fn(async () => ndjson([ev({ type: "text", text: "Hi" })]));
+      const client = createHttpLlmClient({ apiKey: KEY, fetchImpl });
+      await expect(client.stream?.(req, () => undefined)).rejects.toMatchObject({ kind: "network" });
+    });
+
+    it("rejects garbage lines", async () => {
+      const fetchImpl = vi.fn(async () => ndjson(["nope\n"]));
+      const client = createHttpLlmClient({ apiKey: KEY, fetchImpl });
+      await expect(client.stream?.(req, () => undefined)).rejects.toMatchObject({ kind: "unknown" });
+    });
+  });
 });

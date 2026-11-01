@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { LlmError } from "@/contracts/errors";
-import { FakeLlmClient } from "@/contracts/fakes";
+import { FakeLlmClient, FakeStreamingLlmClient, chunk } from "@/contracts/fakes";
 import type { Scenario } from "@/contracts/types";
 import { requestCounterpartReply } from "./counterpart";
 import { addOpeningTurn, addUserTurn, createSession } from "./machine";
@@ -96,5 +96,65 @@ describe("requestCounterpartReply", () => {
     expect(msg).toContain("You: Hello.");
     expect(msg).toContain("Them: I deserve a raise");
     expect(req?.messages).toHaveLength(1);
+  });
+
+  describe("streaming", () => {
+    const streamOf = (text: string) => ({ pieces: chunk(text, 4) });
+
+    it("hands out sentences while the reply is still arriving", async () => {
+      const text = JSON.stringify({ reply: "Fine. Tell me why.", mood: "open", give: 40 });
+      const llm = new FakeStreamingLlmClient([streamOf(text)]);
+      const reply = await requestCounterpartReply(awaiting(), llm, {
+        onSpeakable: (s) => llm.log.push(`say:${s}`),
+      });
+      expect(reply).toEqual({ reply: "Fine. Tell me why.", mood: "open", give: 40 });
+      const says = llm.log.filter((e) => e.startsWith("say:"));
+      expect(says).toEqual(["say:Fine.", "say:Tell me why."]);
+      // The first sentence was said before the last piece arrived.
+      expect(llm.log.indexOf("say:Fine.")).toBeLessThan(llm.log.length - 3);
+    });
+
+    it("keeps what was already said instead of asking again", async () => {
+      const llm = new FakeStreamingLlmClient([streamOf(tooLong)]);
+      const said: string[] = [];
+      const reply = await requestCounterpartReply(awaiting(), llm, { onSpeakable: (s) => said.push(s) });
+      expect(llm.calls).toHaveLength(1);
+      expect(said).toEqual(["A.", "B.", "C."]);
+      expect(reply).toEqual({ reply: "A. B. C.", mood: "guarded", give: 35 });
+    });
+
+    it("never says the bottom line, and keeps mood and give from a broken reply where it can", async () => {
+      const text = '{"reply": "Look. I can go up to 8% max.", "mood": "warm", "give": "lots"}';
+      const llm = new FakeStreamingLlmClient([streamOf(text)]);
+      const said: string[] = [];
+      const reply = await requestCounterpartReply(awaiting(), llm, { onSpeakable: (s) => said.push(s) });
+      expect(said).toEqual(["Look."]);
+      expect(reply).toEqual({ reply: "Look.", mood: "warm", give: 30 });
+    });
+
+    it("asks again when nothing was said yet", async () => {
+      const llm = new FakeStreamingLlmClient([{ pieces: ["not json"] }, streamOf(good)]);
+      const said: string[] = [];
+      const reply = await requestCounterpartReply(awaiting(), llm, { onSpeakable: (s) => said.push(s) });
+      expect(llm.calls).toHaveLength(2);
+      expect(said).toEqual(["Tell me why."]);
+      expect(reply.reply).toBe("Tell me why.");
+    });
+
+    it("keeps what was said when the connection drops mid-reply", async () => {
+      const llm = new FakeStreamingLlmClient([
+        { pieces: ['{"reply": "Fine. ', "Tell me"], failAfter: new LlmError("network", "dropped") },
+      ]);
+      const said: string[] = [];
+      const reply = await requestCounterpartReply(awaiting(), llm, { onSpeakable: (s) => said.push(s) });
+      expect(reply).toEqual({ reply: "Fine.", mood: "neutral", give: 30 });
+    });
+
+    it("passes on a dropped connection when nothing was said", async () => {
+      const llm = new FakeStreamingLlmClient([{ pieces: ['{"mo'], failAfter: new LlmError("network", "dropped") }]);
+      await expect(requestCounterpartReply(awaiting(), llm, { onSpeakable: () => undefined })).rejects.toMatchObject({
+        kind: "network",
+      });
+    });
   });
 });
