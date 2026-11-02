@@ -1,5 +1,7 @@
 # Ghost Rehearsal
 
+> **This is a test run for [orc](https://github.com/Aryan-sk6/Orc).** Ghost Rehearsal was built to try out orc, a tool that plans an app and then runs one AI coding session per workstream (here: conversation engine, speech, analysis and web UI) before merging them. The first version came entirely from that run. The bug fixes and later features were then made by hand with Claude Code, and the orc setup files were removed afterwards. Expect rough edges.
+
 Ghost Rehearsal lets you practise a hard conversation out loud against a voice AI before you have it for real. Pick one of five built-in scenarios (asking for a raise, returning a faulty product, saying no to extra work, pitching for seed funding, negotiating a rent renewal) or build your own. Before you start, you can spend 30 seconds noting what you'll ask for and the least you'd accept. The AI plays the other person and has a hidden bottom line you have to find. If you talk for 40 seconds without a break, they cut in, the way an impatient person would. Afterwards you get scores, how their willingness and mood moved turn by turn, a check of your plan against what you said, a comparison with your last attempt, speaking metrics (pace, talk ratio, filler words, hedges, pauses) and the three moments where you lost the most ground, each with a stronger line to try and a "Retry from here" button.
 
 > Ghost Rehearsal is practice, not therapy or professional advice.
